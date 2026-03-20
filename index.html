@@ -22,8 +22,9 @@
     <h1>🧑‍🚀 Astr0 — Demo por cuadrantes</h1>
     <div class="row">
       <span class="badge" id="planet">Planeta: Violeta‑01</span>
-      <span class="badge" id="quad">Cuadrante: (0,0)</span>
+      <span class="badge" id="quad">Cuadrante: —</span>
       <span class="badge" id="fps">FPS: —</span>
+      <span class="badge" id="tests">Tests: —</span>
     </div>
     <div class="help">
       <div><kbd>WASD</kbd> mover • clic izq: disparar • mouse: apuntar</div>
@@ -31,7 +32,7 @@
       <div><kbd>R</kbd> centrar jugador • <kbd>P</kbd> pausa</div>
     </div>
   </div>
-  <div class="credits">v0.1 — Cuadrantes estilo tablero + disparo con arco</div>
+  <div class="credits">v0.3 — Fix sintaxis + Tablero 8×8 + minimapa + etiquetas A1–H8 + tests</div>
 
 <script>
 (() => {
@@ -50,16 +51,17 @@
   resize();
 
   // ====== World / Quadrants ======
-  const QUAD_SIZE = { w: 1920, h: 1080 }; // cuadrante lógico base (antes de escalar por DPR)
-  const WORLD_BOUNDS = { minX: -4, maxX: 4, minY: -4, maxY: 4 }; // 9x9 como ejemplo
+  const QUAD_SIZE = { w: 1920, h: 1080 }; // tamaño lógico por cuadrante
+  const WORLD_BOUNDS = { minX: 0, maxX: 7, minY: 0, maxY: 7 }; // tablero 8×8: A..H × 8..1
 
   // ====== UI refs ======
   const quadEl = document.getElementById('quad');
   const fpsEl = document.getElementById('fps');
+  const testsEl = document.getElementById('tests');
 
   // ====== Input ======
   const keys = new Set();
-  const mouse = { x: 0, y: 0, worldX: 0, worldY: 0, down: false };
+  const mouse = { x: 0, y: 0, down: false };
   window.addEventListener('keydown', (e) => { keys.add(e.key.toLowerCase()); });
   window.addEventListener('keyup', (e) => { keys.delete(e.key.toLowerCase()); });
   canvas.addEventListener('pointermove', (e) => {
@@ -67,19 +69,28 @@
     mouse.x = (e.clientX - rect.left) * DPR;
     mouse.y = (e.clientY - rect.top) * DPR;
   });
-  canvas.addEventListener('pointerdown', (e) => { mouse.down = true; });
-  canvas.addEventListener('pointerup', (e) => { mouse.down = false; });
+  canvas.addEventListener('pointerdown', () => { mouse.down = true; });
+  canvas.addEventListener('pointerup', () => { mouse.down = false; });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // ====== Math / Utils ======
   function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
   function len(x, y){ return Math.hypot(x, y); }
   function normalize(x, y){ const L = len(x,y)||1; return { x: x/L, y: y/L }; }
-  // seedable RNG per cuadrante
+  // RNG por cuadrante (seedable)
   function hash2i(x, y){
-    let h = x * 374761393 + y * 668265263; h = (h ^ (h >> 13)) * 1274126177; return (h ^ (h >> 16)) >>> 0;
+    let h = x * 374761393 + y * 668265263; 
+    h = (h ^ (h >> 13)) * 1274126177; 
+    return (h ^ (h >> 16)) >>> 0;
   }
-  function mulberry32(a){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; } }
+  function mulberry32(a){ 
+    return function(){ 
+      let t = a += 0x6D2B79F5; 
+      t = Math.imul(t ^ t >>> 15, t | 1); 
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61); 
+      return ((t ^ t >>> 14) >>> 0) / 4294967296; 
+    } 
+  }
 
   // ====== Player ======
   const player = {
@@ -92,11 +103,22 @@
 
   // ====== Quadrant State ======
   const state = {
-    qx: 0, qy: 0,
+    qx: 0, qy: 0, // (0,0) = A8 (arriba-izquierda), (0,7) = A1 (abajo-izquierda)
     paused: false,
     arrows: [],
     lastTime: performance.now(),
   };
+
+  // ====== Etiquetas de cuadrante (A1..H8) ======
+  function quadName(qx = state.qx, qy = state.qy){
+    // Archivos A..H, filas 8..1 (A1 abajo-izquierda, A8 arriba-izquierda)
+    const file = String.fromCharCode(65 + clamp(qx,0,7));
+    const rank = 8 - clamp(qy,0,7);
+    return `${file}${rank}`;
+  }
+  function updateQuadLabel(){
+    quadEl.textContent = `Cuadrante: ${quadName()}`;
+  }
   updateQuadLabel();
 
   // ====== Entities by Quadrant (decor) ======
@@ -106,16 +128,12 @@
     const plants = [];
     const countR = 8 + Math.floor(rnd()*10);
     const countP = 12 + Math.floor(rnd()*12);
-    for(let i=0;i<countR;i++){
-      rocks.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 10 + rnd()*26 });
-    }
-    for(let i=0;i<countP;i++){
-      plants.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 6 + rnd()*14 });
-    }
+    for(let i=0;i<countR;i++) rocks.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 10 + rnd()*26 });
+    for(let i=0;i<countP;i++) plants.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 6 + rnd()*14 });
     return { rocks, plants, tint: 0.82 + (rnd()*0.16) };
   }
   const decorCache = new Map();
-  function decorKey(qx,qy){ return qx+','+qy; }
+  const decorKey = (qx,qy) => `${qx},${qy}`;
   function getDecor(qx,qy){
     const k = decorKey(qx,qy);
     if(!decorCache.has(k)) decorCache.set(k, genDecorFor(qx,qy));
@@ -123,23 +141,20 @@
   }
 
   // ====== Camera ======
+  const sx = () => canvas.width/QUAD_SIZE.w;
+  const sy = () => canvas.height/QUAD_SIZE.h;
   function worldToScreen(wx, wy){
-    // cada cuadrante ocupa QUAD_SIZE; cámara centrada en cuadrante actual
+    // cámara centrada en el cuadrante actual
     const ox = state.qx*QUAD_SIZE.w;
     const oy = state.qy*QUAD_SIZE.h;
-    return { x: (wx - ox) * (canvas.width/QUAD_SIZE.w), y: (wy - oy) * (canvas.height/QUAD_SIZE.h) };
-  }
-  function screenToWorld(sx, sy){
-    const wx = sx * (QUAD_SIZE.w/canvas.width) + state.qx*QUAD_SIZE.w;
-    const wy = sy * (QUAD_SIZE.h/canvas.height) + state.qy*QUAD_SIZE.h;
-    return { x: wx, y: wy };
+    return { x: (wx - ox) * sx(), y: (wy - oy) * sy() };
   }
 
-  // ====== Teleport logic ======
+  // ====== Teleport / Movimiento entre cuadrantes ======
   function teleportTowardMouse(){
-    // decide borde más cercano según ángulo hacia el cursor
-    const pScr = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-    const dx = mouse.x - pScr.x, dy = mouse.y - pScr.y;
+    // decidir borde según ángulo hacia el cursor
+    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
+    const dx = mouse.x - p.x, dy = mouse.y - p.y;
     if(Math.abs(dx) > Math.abs(dy)){
       if(dx > 0) tryMoveQuadrant(1, 0, 'right'); else tryMoveQuadrant(-1, 0, 'left');
     } else {
@@ -152,27 +167,77 @@
     if(nx === state.qx && ny === state.qy) return; // borde del mundo
     state.qx = nx; state.qy = ny;
     // coloca al jugador en el borde opuesto para coherencia
-    if(edge === 'right'){ player.pos.x = 10; }
-    if(edge === 'left'){ player.pos.x = QUAD_SIZE.w-10; }
-    if(edge === 'down'){ player.pos.y = 10; }
-    if(edge === 'up'){ player.pos.y = QUAD_SIZE.h-10; }
+    if(edge === 'right') player.pos.x = 10;
+    if(edge === 'left')  player.pos.x = QUAD_SIZE.w-10;
+    if(edge === 'down')  player.pos.y = 10;
+    if(edge === 'up')    player.pos.y = QUAD_SIZE.h-10;
     updateQuadLabel();
   }
-  function updateQuadLabel(){ quadEl.textContent = `Cuadrante: (${state.qx},${state.qy})`; }
 
   // ====== Armas ======
   function shoot(){
     if(player.fireCooldown > 0) return;
-    const pScreen = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-    const vx = mouse.x - pScreen.x, vy = mouse.y - pScreen.y;
+    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
+    const vx = mouse.x - p.x, vy = mouse.y - p.y;
     const dir = normalize(vx, vy);
     const speed = 900; // px/s
-    state.arrows.push({
-      x: player.pos.x, y: player.pos.y,
-      vx: dir.x * speed, vy: dir.y * speed,
-      life: 1.2 // segundos
-    });
+    state.arrows.push({ x: player.pos.x, y: player.pos.y, vx: dir.x * speed, vy: dir.y * speed, life: 1.2 });
     player.fireCooldown = player.fireRate;
+  }
+
+  // ====== Minimap ======
+  function drawMinimap(){
+    const pad = 12 * DPR;
+    const cell = 14 * DPR; // tamaño de cada casilla
+    const cols = 8, rows = 8;
+    const w = cols * cell, h = rows * cell;
+    const x0 = canvas.width - pad - w;
+    const y0 = pad + 12*DPR; // espacio para letras A..H
+
+    ctx.save();
+    // marco
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(x0 - 6*DPR, y0 - 18*DPR, w + 12*DPR, h + 30*DPR);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 2*DPR;
+    ctx.strokeRect(x0 - 6*DPR, y0 - 18*DPR, w + 12*DPR, h + 30*DPR);
+
+    // celdas (gy=0 es la fila 8, gy=7 fila 1)
+    for(let gy=0; gy<rows; gy++){
+      for(let gx=0; gx<cols; gx++){
+        const light = ((gx + gy) % 2) === 0;
+        ctx.fillStyle = light ? 'rgba(230,238,248,0.18)' : 'rgba(230,238,248,0.08)';
+        const cx = x0 + gx*cell;
+        const cy = y0 + gy*cell;
+        ctx.fillRect(cx, cy, cell, cell);
+        if(gx === state.qx && gy === state.qy){
+          ctx.fillStyle = 'rgba(177,198,255,0.65)';
+          ctx.fillRect(cx+2*DPR, cy+2*DPR, cell-4*DPR, cell-4*DPR);
+        }
+      }
+    }
+
+    // labels de archivos (A..H) y filas (8..1)
+    ctx.fillStyle = '#cfe0ff';
+    ctx.font = `${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`;
+    ctx.textAlign = 'center';
+    for(let gx=0; gx<cols; gx++){
+      const cx = x0 + gx*cell + cell/2;
+      ctx.fillText(String.fromCharCode(65+gx), cx, y0 - 6*DPR);
+    }
+    ctx.textAlign = 'right';
+    for(let gy=0; gy<rows; gy++){
+      const cy = y0 + gy*cell + cell/2 + 4*DPR;
+      ctx.fillText(String(8-gy), x0 - 6*DPR, cy);
+    }
+
+    // etiqueta del nombre (A1..H8)
+    ctx.fillStyle = '#cfe0ff';
+    ctx.font = `${Math.floor(11*DPR)}px system-ui,Segoe UI,Roboto`;
+    ctx.textAlign = 'right';
+    ctx.fillText(quadName(), x0 + w + 4*DPR, y0 + h + 18*DPR);
+
+    ctx.restore();
   }
 
   // ====== Game Loop ======
@@ -181,23 +246,28 @@
     const now = performance.now();
     const dt = Math.min(0.033, (now - state.lastTime) / 1000);
     state.lastTime = now;
+
     if(!state.paused){
       update(dt);
       render();
     } else {
       render(true);
     }
-    const fps = 1/dt; fpsSmoothed = fpsSmoothed*0.9 + fps*0.1; fpsEl.textContent = 'FPS: ' + fpsSmoothed.toFixed(0);
+
+    const fps = 1/dt; 
+    fpsSmoothed = fpsSmoothed*0.9 + fps*0.1; 
+    fpsEl.textContent = 'FPS: ' + fpsSmoothed.toFixed(0);
+
     requestAnimationFrame(step);
   }
 
   function update(dt){
-    // ===== Input acciones de un frame =====
+    // Acciones instantáneas
     if(keys.has('e')){ keys.delete('e'); teleportTowardMouse(); }
     if(keys.has('r')){ keys.delete('r'); player.pos.x = QUAD_SIZE.w/2; player.pos.y = QUAD_SIZE.h/2; }
     if(keys.has('p')){ keys.delete('p'); state.paused = !state.paused; }
 
-    // ===== Movimiento =====
+    // Movimiento
     let ax = 0, ay = 0;
     if(keys.has('w') || keys.has('arrowup')) ay -= 1;
     if(keys.has('s') || keys.has('arrowdown')) ay += 1;
@@ -207,20 +277,20 @@
     player.pos.x += dir.x * player.speed * dt;
     player.pos.y += dir.y * player.speed * dt;
 
-    // ===== Límite de cuadrante + paso al vecino por borde =====
+    // Salida por bordes
     if(player.pos.x < 0){ tryMoveQuadrant(-1,0,'left'); }
     if(player.pos.x > QUAD_SIZE.w){ tryMoveQuadrant(1,0,'right'); }
     if(player.pos.y < 0){ tryMoveQuadrant(0,-1,'up'); }
     if(player.pos.y > QUAD_SIZE.h){ tryMoveQuadrant(0,1,'down'); }
 
-    // ===== Disparo =====
+    // Disparo
     if(mouse.down) shoot();
     if(player.fireCooldown > 0) player.fireCooldown -= dt;
 
+    // Flechas
     for(let i=state.arrows.length-1;i>=0;i--){
       const a = state.arrows[i];
       a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt;
-      // si sale del cuadrante actual, la flecha sigue en el mismo cuadrante (simple), o se pierde
       if(a.x < -40 || a.x > QUAD_SIZE.w+40 || a.y < -40 || a.y > QUAD_SIZE.h+40 || a.life <= 0){
         state.arrows.splice(i,1);
       }
@@ -228,21 +298,23 @@
   }
 
   function render(paused=false){
-    // fondo con gradiente violeta y textura ligera por cuadrante
     const decor = getDecor(state.qx, state.qy);
     const tint = decor.tint;
+
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    // Fondo
+    // Fondo gradiente
     const g = ctx.createLinearGradient(0,0,canvas.width,canvas.height);
     g.addColorStop(0, `rgba(${Math.floor(90*tint)}, ${Math.floor(35*tint)}, 140, 1)`);
     g.addColorStop(1, `rgba(${Math.floor(35*tint)}, ${Math.floor(10*tint)}, 70, 1)`);
-    ctx.fillStyle = g; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = g; 
+    ctx.fillRect(0,0,canvas.width,canvas.height);
 
-    // Decor (rocas y plantas)
+    // Escala lógica -> pantalla
     ctx.save();
-    const sx = canvas.width/QUAD_SIZE.w, sy = canvas.height/QUAD_SIZE.h;
-    ctx.scale(sx, sy);
+    ctx.scale(sx(), sy());
+
+    // Decor
     ctx.globalAlpha = 0.7;
     ctx.fillStyle = 'rgba(255,255,255,0.08)';
     for(const r of decor.rocks){ ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI*2); ctx.fill(); }
@@ -257,7 +329,7 @@
     for(const a of state.arrows){
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
-      ctx.lineTo(a.x - a.vx*0.03, a.y - a.vy*0.03); // pequeña estela
+      ctx.lineTo(a.x - a.vx*0.03, a.y - a.vy*0.03); // estela
       ctx.stroke();
       // punta
       const ang = Math.atan2(a.vy, a.vx);
@@ -269,29 +341,31 @@
       ctx.fill();
     }
 
-    // Jugador (astronauta minimalista)
-    // cuerpo
+    // Jugador
     ctx.fillStyle = paused ? '#8aa8ff' : '#ffffff';
     ctx.beginPath(); ctx.arc(player.pos.x, player.pos.y, player.radius, 0, Math.PI*2); ctx.fill();
-    // visor casco
     ctx.fillStyle = '#0b1020';
     ctx.beginPath(); ctx.arc(player.pos.x, player.pos.y-3, player.radius*0.55, 0, Math.PI*2); ctx.fill();
-    // arco luminoso indicando dirección de mira
-    const pScreen = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-    const aim = normalize(mouse.x - pScreen.x, mouse.y - pScreen.y);
+
+    // Arco (dirección de mira)
+    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
+    const aim = normalize(mouse.x - p.x, mouse.y - p.y);
     const bowR = player.radius + 6;
     ctx.strokeStyle = '#b1c6ff'; ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.arc(player.pos.x, player.pos.y, bowR, Math.atan2(aim.y, aim.x)-0.9, Math.atan2(aim.y, aim.x)+0.9);
     ctx.stroke();
 
-    // marco sutil del cuadrante
+    // Marco sutil del cuadrante
     ctx.setLineDash([8,6]);
     ctx.strokeStyle = 'rgba(230,238,248,0.22)';
     ctx.lineWidth = 2;
     ctx.strokeRect(4,4,QUAD_SIZE.w-8,QUAD_SIZE.h-8);
 
     ctx.restore();
+
+    // Minimap
+    drawMinimap();
 
     if(paused){
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -303,7 +377,26 @@
     }
   }
 
+  // ====== Tests (auto) ======
+  function runTests(){
+    const cases = [
+      { in:[0,7], out:'A1' }, // abajo-izquierda
+      { in:[7,7], out:'H1' }, // abajo-derecha
+      { in:[0,0], out:'A8' }, // arriba-izquierda
+      { in:[7,0], out:'H8' }, // arriba-derecha
+      { in:[3,4], out:'D4' },
+      { in:[-2,10], out:'A1' }, // clamp
+    ];
+    let pass = 0;
+    for(const c of cases){
+      const got = quadName(c.in[0], c.in[1]);
+      if(got === c.out) pass++; else console.warn('Test fail', c, 'got:', got);
+    }
+    testsEl.textContent = `Tests: ${pass}/${cases.length}`;
+  }
+
   // ====== Start ======
+  runTests();
   state.lastTime = performance.now();
   requestAnimationFrame(step);
 })();
