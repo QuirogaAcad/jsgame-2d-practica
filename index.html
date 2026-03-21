@@ -47,7 +47,7 @@
       <div>Los <b>muros del borde del mundo</b> son visibles dentro de cada cuadrante.</div>
     </div>
   </div>
-  <div class="credits">v0.6 — Sin <R>, + Mundo Creativo, muros visibles, plantilla comentada</div>
+  <div class="credits">v0.7 — Fix P (no-repeat), pointerleave, mundos 1/2/3, muros visibles, plantilla comentada</div>
 
 <script>
 (() => {
@@ -134,11 +134,12 @@
   const keys = new Set();
   const mouse = { x:0, y:0, down:false };
 
+  // FIX: evitar que mantener presionada "P" haga toggle repetido
   window.addEventListener('keydown', (e)=>{
     const k = e.key.toLowerCase();
     keys.add(k);
     // Pausa/reanudar SIEMPRE funciona (incluso estando en pausa)
-    if(k === 'p') state.paused = !state.paused;
+    if(k === 'p' && !e.repeat) state.paused = !state.paused;
     // Selección rápida de mundos
     if(k === '1') selectWorld('violeta');
     if(k === '2') selectWorld('tierra');
@@ -153,6 +154,7 @@
   });
   canvas.addEventListener('pointerdown', ()=>{ mouse.down = true; });
   canvas.addEventListener('pointerup',   ()=>{ mouse.down = false; });
+  canvas.addEventListener('pointerleave',()=>{ mouse.down = false; }); // FIX: evita "click pegado"
   canvas.addEventListener('contextmenu', (e)=> e.preventDefault());
 
   worldVBtn.addEventListener('click', ()=> selectWorld('violeta'));
