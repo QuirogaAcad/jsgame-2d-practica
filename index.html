@@ -34,20 +34,18 @@
       <button class="btn" id="bagBtn">🎒 Mochila</button>
     </div>
     <div class="row">
-      <span class="badge" id="world">Mundo: —</span>
-      <span class="badge" id="quad">Cuadrante: —</span>
       <span class="badge" id="boss">Boss: —</span>
       <span class="badge" id="fps">FPS: —</span>
-      <span class="badge" id="tests">Tests: —</span>
     </div>
     <div class="help">
       <div><kbd>WASD</kbd> mover • clic izq: disparar • mouse: apuntar</div>
+      <div><kbd>1</kbd> dash • <kbd>2</kbd> 2 flechas • <kbd>3</kbd> 3 flechas seguidas (CD 20s)</div>
       <div><kbd>E</kbd> teletransportar cuadrante aleatorio • bordes duros 8×8</div>
       <div><kbd>P</kbd> pausa / reanudar • <kbd>I</kbd> o botón para mochila</div>
       <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
     </div>
   </div>
-  <div class="credits">v1.3 — FIX arranque completo • selector desplegable • mochila 2×4 • corazones reubicados • GAME OVER + reinicio</div>
+  <div class="credits">v1.5 — FIX inicio + habilidades (1/2/3 con cooldown) + selector desplegable</div>
   <button id="restartBtn">Reiniciar Juego</button>
 
 <script>
@@ -78,14 +76,9 @@
   const INITIAL_STATE={world:'violeta',qx:0,qy:7,paused:false,arrows:[],lastTime:performance.now(),gameOver:false,showBag:false};
   const state={...INITIAL_STATE};
 
-  function quadName(qx=state.qx,qy=state.qy){const file=String.fromCharCode(65+clamp(qx,0,7));const rank=8-clamp(qy,0,7);return `${file}${rank}`;}
-
-  // HUD refs
-  const worldEl=document.getElementById('world');
-  const quadEl=document.getElementById('quad');
-  const fpsEl=document.getElementById('fps');
-  const testsEl=document.getElementById('tests');
+  // HUD refs (visibles)
   const bossEl=document.getElementById('boss');
+  const fpsEl=document.getElementById('fps');
   const worldSelect=document.getElementById('worldSelect');
   const bagBtn=document.getElementById('bagBtn');
   const restartBtn=document.getElementById('restartBtn');
@@ -93,11 +86,15 @@
   const keys=new Set();
   const mouse={x:0,y:0,down:false};
 
+  // ===================== Input =====================
   window.addEventListener('keydown',e=>{
     const k=e.key.toLowerCase(); keys.add(k);
     if(k==='p'&&!e.repeat) state.paused=!state.paused;
     if(k==='i'&&!e.repeat) state.showBag=!state.showBag;
     if(k==='e'){ keys.delete('e'); teleportRandomQuadrant(); }
+    if(k==='1') abilityDash();
+    if(k==='2') abilityTwinShot();
+    if(k==='3') abilityTripleBurst();
   });
   window.addEventListener('keyup',e=>{keys.delete(e.key.toLowerCase());});
   canvas.addEventListener('pointermove',e=>{const r=canvas.getBoundingClientRect();mouse.x=(e.clientX-r.left)*DPR;mouse.y=(e.clientY-r.top)*DPR;});
@@ -110,21 +107,66 @@
   bagBtn.addEventListener('click',()=>{state.showBag=!state.showBag});
   restartBtn.addEventListener('click',()=>{resetGame()});
 
-  function updateBadges(){
-    worldEl.textContent=`Mundo: ${WORLDS[state.world].label}`;
-    quadEl.textContent=`Cuadrante: ${quadName()}`;
+  function updateBossBadge(){
     const b=bosses[state.world];
-    bossEl.textContent=`Boss: ${b.alive?quadName(b.qx,b.qy):'Derrotado'}`;
+    bossEl.textContent=`Boss: ${b.alive? (String.fromCharCode(65+clamp(b.qx,0,7)) + (8-clamp(b.qy,0,7))) : 'Derrotado'}`;
   }
 
   // ===================== Entities =====================
   const player={pos:{x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2},speed:360,radius:14,fireCooldown:0,fireRate:0.18,hpMax:3,hp:3,inv:0};
   const bag=new Array(8).fill(null); // 2x4 slots
 
-  function resetPlayer(){player.hp=player.hpMax;player.inv=0;state.gameOver=false;state.paused=false;player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;}
-  function resetGame(){Object.assign(state,{...INITIAL_STATE,lastTime:performance.now()});resetPlayer();bosses.violeta=spawnBossFor('violeta');bosses.tierra=spawnBossFor('tierra');bosses.neon=spawnBossFor('neon');state.arrows.length=0;restartBtn.style.display='none';updateBadges();worldSelect.value=state.world;}
+  // Habilidades (cooldowns en segundos)
+  const abilities={
+    dash:{cd:0,max:20},
+    twin:{cd:0,max:20},
+    burst:{cd:0,max:20},
+    activeBurst:null // {remain, interval, t}
+  };
 
-  function shoot(){if(player.fireCooldown>0||state.gameOver) return;const p=worldToScreen(player.pos.x+state.qx*QUAD_SIZE.w,player.pos.y+state.qy*QUAD_SIZE.h);const v={x:mouse.x-p.x,y:mouse.y-p.y};const d=norm(v.x,v.y);const speed=900;state.arrows.push({x:player.pos.x,y:player.pos.y,vx:d.x*speed,vy:d.y*speed,life:1.2});player.fireCooldown=player.fireRate;}
+  function resetPlayer(){player.hp=player.hpMax;player.inv=0;state.gameOver=false;state.paused=false;player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;}
+  function resetGame(){Object.assign(state,{...INITIAL_STATE,lastTime:performance.now()});resetPlayer();bosses.violeta=spawnBossFor('violeta');bosses.tierra=spawnBossFor('tierra');bosses.neon=spawnBossFor('neon');state.arrows.length=0;restartBtn.style.display='none';worldSelect.value=state.world;updateBossBadge();}
+
+  function shoot(angleOverride=null,speedMul=1){
+    if(player.fireCooldown>0||state.gameOver) return false;
+    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
+    let vx=mouse.x-p.x, vy=mouse.y-p.y; let ang=Math.atan2(vy,vx);
+    if(angleOverride!==null) ang=angleOverride;
+    const d={x:Math.cos(ang), y:Math.sin(ang)}; const speed=900*speedMul;
+    state.arrows.push({x:player.pos.x,y:player.pos.y,vx:d.x*speed,vy:d.y*speed,life:1.2});
+    player.fireCooldown=player.fireRate;
+    return true;
+  }
+
+  // Habilidad 1 — Dash hacia delante (clamp dentro del cuadrante actual)
+  function abilityDash(){
+    if(abilities.dash.cd>0 || state.gameOver) return;
+    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
+    const ang=Math.atan2(mouse.y-p.y, mouse.x-p.x);
+    const dist=220; // píxeles lógicos
+    player.pos.x = clamp(player.pos.x + Math.cos(ang)*dist, 0, QUAD_SIZE.w);
+    player.pos.y = clamp(player.pos.y + Math.sin(ang)*dist, 0, QUAD_SIZE.h);
+    abilities.dash.cd = abilities.dash.max;
+  }
+
+  // Habilidad 2 — Doble flecha (ligera dispersión)
+  function abilityTwinShot(){
+    if(abilities.twin.cd>0 || state.gameOver) return;
+    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
+    const base=Math.atan2(mouse.y-p.y, mouse.x-p.x);
+    shoot(base-0.08); shoot(base+0.08);
+    abilities.twin.cd = abilities.twin.max;
+  }
+
+  // Habilidad 3 — Triple ráfaga seguida (pequeño delay gestionado en update)
+  function abilityTripleBurst(){
+    if(abilities.burst.cd>0 || state.gameOver) return;
+    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
+    const base=Math.atan2(mouse.y-p.y, mouse.x-p.x);
+    shoot(base);
+    abilities.activeBurst = {base, remain:2, interval:0.08, t:0.08};
+    abilities.burst.cd = abilities.burst.max;
+  }
 
   const bosses={};
   function spawnBossFor(worldId){let bx=Math.floor(RND()*8),by=Math.floor(RND()*8);if(bx===0&&by===7)bx=(bx+1)%8;return{world:worldId,qx:bx,qy:by,alive:true,x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2,r:32,hp:100,t:0};}
@@ -132,14 +174,14 @@
   bosses.tierra=spawnBossFor('tierra');
   bosses.neon=spawnBossFor('neon');
 
-  function updateBoss(dt){const b=bosses[state.world];if(!b.alive) return;if(state.qx!==b.qx||state.qy!==b.qy) return;b.t+=dt;const cfg={violeta:{R:120,w:1.2,k:0.6},tierra:{R:110,w:0.9,k:0.8},neon:{R:140,w:1.5,k:1.0}}[state.world];b.x=QUAD_SIZE.w/2+Math.cos(b.t*cfg.w)*cfg.R;b.y=QUAD_SIZE.h/2+Math.sin(b.t*cfg.w)*cfg.R*cfg.k;for(let i=state.arrows.length-1;i>=0;i--){const a=state.arrows[i];if(dist2(a.x,a.y,b.x,b.y)<=(b.r+6)*(b.r+6)){b.hp-=10;state.arrows.splice(i,1);if(b.hp<=0){b.alive=false;bossEl.textContent='Boss: Derrotado';break;}}}if(player.inv<=0&&dist2(player.pos.x,player.pos.y,b.x,b.y)<=(player.radius+b.r)*(player.radius+b.r)){player.hp-=1;player.inv=1.2;const away=norm(player.pos.x-b.x,player.pos.y-b.y);player.pos.x+=away.x*28;player.pos.y+=away.y*28;if(player.hp<=0){state.gameOver=true;restartBtn.style.display='block';}}}
+  function updateBoss(dt){const b=bosses[state.world];if(!b.alive) return;if(state.qx!==b.qx||state.qy!==b.qy) return;b.t+=dt;const cfg={violeta:{R:120,w:1.2,k:0.6},tierra:{R:110,w:0.9,k:0.8},neon:{R:140,w:1.5,k:1.0}}[state.world];b.x=QUAD_SIZE.w/2+Math.cos(b.t*cfg.w)*cfg.R;b.y=QUAD_SIZE.h/2+Math.sin(b.t*cfg.w)*cfg.R*cfg.k;for(let i=state.arrows.length-1;i>=0;i--){const a=state.arrows[i];if(dist2(a.x,a.y,b.x,b.y)<=(b.r+6)*(b.r+6)){b.hp-=10;state.arrows.splice(i,1);if(b.hp<=0){b.alive=false;updateBossBadge();break;}}}if(player.inv<=0&&dist2(player.pos.x,player.pos.y,b.x,b.y)<=(player.radius+b.r)*(player.radius+b.r)){player.hp-=1;player.inv=1.2;const away=norm(player.pos.x-b.x,player.pos.y-b.y);player.pos.x+=away.x*28;player.pos.y+=away.y*28;if(player.hp<=0){state.gameOver=true;restartBtn.style.display='block';}}}
 
   function renderBoss(){const b=bosses[state.world];if(!b.alive) return;if(state.qx!==b.qx||state.qy!==b.qy) return;const color=state.world==='violeta'?'#ff6565':state.world==='tierra'?'#ffd166':'#8a5cff';const bar=state.world==='violeta'?'#ff9090':state.world==='tierra'?'#ffe09a':'#c3a3ff';ctx.fillStyle=color;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#0b1020';ctx.beginPath();ctx.arc(b.x,b.y-6,b.r*0.35,0,Math.PI*2);ctx.fill();const W=240,H=12,X=(QUAD_SIZE.w-W)/2,Y=28;ctx.fillStyle='rgba(0,0,0,0.35)';ctx.fillRect(X,Y,W,H);ctx.fillStyle=bar;ctx.fillRect(X,Y,W*(b.hp/100),H);ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.strokeRect(X,Y,W,H);}
 
   // ===================== Movement & transitions =====================
-  function selectWorld(worldId){if(!WORLDS[worldId])return;state.world=worldId;player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;updateBadges();worldSelect.value=worldId;}
-  function teleportRandomQuadrant(){let nx,ny;do{nx=Math.floor(RND()*8);ny=Math.floor(RND()*8);}while(nx===state.qx&&ny===state.qy);state.qx=nx;state.qy=ny;player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;updateBadges();}
-  function tryMoveQuadrant(dx,dy,edge){const nx=state.qx+dx,ny=state.qy+dy;if(nx<WORLD_BOUNDS.minX||nx>WORLD_BOUNDS.maxX||ny<WORLD_BOUNDS.minY||ny>WORLD_BOUNDS.maxY){if(edge==='left')player.pos.x=0;if(edge==='right')player.pos.x=QUAD_SIZE.w;if(edge==='up')player.pos.y=0;if(edge==='down')player.pos.y=QUAD_SIZE.h;return;}state.qx=nx;state.qy=ny;if(edge==='right')player.pos.x=10;if(edge==='left')player.pos.x=QUAD_SIZE.w-10;if(edge==='down')player.pos.y=10;if(edge==='up')player.pos.y=QUAD_SIZE.h-10;updateBadges();}
+  function selectWorld(worldId){if(!WORLDS[worldId])return;state.world=worldId;player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;worldSelect.value=worldId;updateBossBadge();}
+  function teleportRandomQuadrant(){let nx,ny;do{nx=Math.floor(RND()*8);ny=Math.floor(RND()*8);}while(nx===state.qx&&ny===state.qy);state.qx=nx;state.qy=ny;player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;}
+  function tryMoveQuadrant(dx,dy,edge){const nx=state.qx+dx,ny=state.qy+dy;if(nx<WORLD_BOUNDS.minX||nx>WORLD_BOUNDS.maxX||ny<WORLD_BOUNDS.minY||ny>WORLD_BOUNDS.maxY){if(edge==='left')player.pos.x=0;if(edge==='right')player.pos.x=QUAD_SIZE.w;if(edge==='up')player.pos.y=0;if(edge==='down')player.pos.y=QUAD_SIZE.h;return;}state.qx=nx;state.qy=ny;if(edge==='right')player.pos.x=10;if(edge==='left')player.pos.x=QUAD_SIZE.w-10;if(edge==='down')player.pos.y=10;if(edge==='up')player.pos.y=QUAD_SIZE.h-10;}
 
   function drawWorldWalls(){const wallW=10;ctx.save();const grad=ctx.createLinearGradient(0,0,wallW,0);grad.addColorStop(0,'#ff3b3b');grad.addColorStop(1,'#ffb3b3');ctx.fillStyle=grad; if(state.qy===WORLD_BOUNDS.minY) ctx.fillRect(0,0,QUAD_SIZE.w,wallW); if(state.qy===WORLD_BOUNDS.maxY) ctx.fillRect(0,QUAD_SIZE.h-wallW,QUAD_SIZE.w,wallW); if(state.qx===WORLD_BOUNDS.minX) ctx.fillRect(0,0,wallW,QUAD_SIZE.h); if(state.qx===WORLD_BOUNDS.maxX) ctx.fillRect(QUAD_SIZE.w-wallW,0,wallW,QUAD_SIZE.h); ctx.fillStyle='rgba(230,238,248,0.25)'; const arrow=(x,y,ax,ay)=>{ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-ax*14,y-ay*14);ctx.lineTo(x+ay*14,y-ax*14);ctx.closePath();ctx.fill();}; if(state.qy>WORLD_BOUNDS.minY) arrow(QUAD_SIZE.w/2,8,0,-1); if(state.qy<WORLD_BOUNDS.maxY) arrow(QUAD_SIZE.w/2,QUAD_SIZE.h-8,0,1); if(state.qx>WORLD_BOUNDS.minX) arrow(8,QUAD_SIZE.h/2,-1,0); if(state.qx<WORLD_BOUNDS.maxX) arrow(QUAD_SIZE.w-8,QUAD_SIZE.h/2,1,0); ctx.restore();}
 
@@ -151,7 +193,7 @@
   function genDecorFor(worldId,qx,qy){const offs=worldId==='tierra'?999:worldId==='neon'?2025:0;const rnd=mulberry32(hash2i(qx+offs,qy+offs));const rocks=[],plants=[];const countR=8+Math.floor(rnd()*10),countP=12+Math.floor(rnd()*12);for(let i=0;i<countR;i++) rocks.push({x:rnd()*QUAD_SIZE.w,y:rnd()*QUAD_SIZE.h,r:10+rnd()*26});for(let i=0;i<countP;i++) plants.push({x:rnd()*QUAD_SIZE.w,y:rnd()*QUAD_SIZE.h,r:6+rnd()*14});const tint=worldId==='violeta'?(0.82+rnd()*0.16):worldId==='tierra'?(0.90+rnd()*0.10):(0.95+rnd()*0.05);return {worldId,rocks,plants,tint};}
   function getDecor(worldId,qx,qy){const k=decorKey(worldId,qx,qy); if(!decorCache.has(k)) decorCache.set(k,genDecorFor(worldId,qx,qy)); return decorCache.get(k);}
 
-  function drawMinimap(){const pad=12*DPR, cell=14*DPR, cols=8, rows=8, w=cols*cell, h=rows*cell; const x0=canvas.width-pad-w, y0=pad+12*DPR; const b=bosses[state.world]; ctx.save(); ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR); ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=2*DPR; ctx.strokeRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR); for(let gy=0;gy<rows;gy++) for(let gx=0;gx<cols;gx++){const light=((gx+gy)%2)===0; ctx.fillStyle=light?'rgba(230,238,248,0.18)':'rgba(230,238,248,0.08)'; const cx=x0+gx*cell, cy=y0+gy*cell; ctx.fillRect(cx,cy,cell,cell); if(b.alive&&gx===b.qx&&gy===b.qy){ctx.fillStyle= state.world==='violeta'?'rgba(255,80,80,0.9)': state.world==='tierra'?'rgba(255,180,60,0.95)':'rgba(170,120,255,0.95)'; ctx.beginPath(); ctx.arc(cx+cell/2,cy+cell/2,3.5*DPR,0,Math.PI*2); ctx.fill();} if(gx===state.qx && gy===state.qy){ ctx.strokeStyle='rgba(177,198,255,0.9)'; ctx.lineWidth=2*DPR; ctx.strokeRect(cx+2*DPR,cy+2*DPR,cell-4*DPR,cell-4*DPR);} } ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; for(let gx=0;gx<cols;gx++){const cx=x0+gx*cell+cell/2; ctx.fillText(String.fromCharCode(65+gx),cx,y0-6*DPR);} ctx.textAlign='right'; for(let gy=0;gy<rows;gy++){const cy=y0+gy*cell+cell/2+4*DPR; ctx.fillText(String(8-gy),x0-6*DPR,cy);} ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(11*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='right'; ctx.fillText(quadName(),x0+w+4*DPR,y0+h+18*DPR); ctx.restore(); }
+  function drawMinimap(){const pad=12*DPR, cell=14*DPR, cols=8, rows=8, w=cols*cell, h=rows*cell; const x0=canvas.width-pad-w, y0=pad+12*DPR; const b=bosses[state.world]; ctx.save(); ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR); ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=2*DPR; ctx.strokeRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR); for(let gy=0;gy<rows;gy++) for(let gx=0;gx<cols;gx++){const light=((gx+gy)%2)===0; ctx.fillStyle=light?'rgba(230,238,248,0.18)':'rgba(230,238,248,0.08)'; const cx=x0+gx*cell, cy=y0+gy*cell; ctx.fillRect(cx,cy,cell,cell); if(b.alive&&gx===b.qx&&gy===b.qy){ctx.fillStyle= state.world==='violeta'?'rgba(255,80,80,0.9)': state.world==='tierra'?'rgba(255,180,60,0.95)':'rgba(170,120,255,0.95)'; ctx.beginPath(); ctx.arc(cx+cell/2,cy+cell/2,3.5*DPR,0,Math.PI*2); ctx.fill();} if(gx===state.qx && gy===state.qy){ ctx.strokeStyle='rgba(177,198,255,0.9)'; ctx.lineWidth=2*DPR; ctx.strokeRect(cx+2*DPR,cy+2*DPR,cell-4*DPR,cell-4*DPR);} } ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; for(let gx=0;gx<cols;gx++){const cx=x0+gx*cell+cell/2; ctx.fillText(String.fromCharCode(65+gx),cx,y0-6*DPR);} ctx.textAlign='right'; for(let gy=0;gy<rows;gy++){const cy=y0+gy*cell+cell/2+4*DPR; ctx.fillText(String(8-gy),x0-6*DPR,cy);} ctx.restore(); }
 
   function drawHeartsFixed(){const marginTop=10*DPR; const rightOffset=220*DPR; drawHearts(canvas.width - rightOffset, marginTop);} // arriba y más a la izquierda
   function drawHearts(xRight,yTop){const n=player.hpMax; const size=24*DPR; const gap=12*DPR; for(let i=0;i<n;i++){const filled=i<player.hp; const x=xRight-(n-i-1)*(size+gap); heartIcon(x,yTop,size,filled?'#ff5d73':'rgba(255,255,255,0.25)');}}
@@ -163,7 +205,7 @@
     const decor=getDecor(state.world,state.qx,state.qy), tint=decor.tint;
     // Fondo por mundo
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    if(state.world==='violeta'){const g=ctx.createLinearGradient(0,0,canvas.width,canvas.height); g.addColorStop(0,`rgba(${Math.floor(90*tint)},${Math.floor(35*tint)},140,1)`); g.addColorStop(1,`rgba(${Math.floor(35*tint)},${Math.floor(10*tint)},70,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);} else if(state.world==='tierra'){const g=ctx.createLinearGradient(0,0,0,canvas.height); g.addColorStop(0,`rgba(135,200,${Math.floor(130*tint)},1)`); g.addColorStop(1,`rgba(40,110,45,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);} else {ctx.fillStyle='#111325'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.save(); ctx.globalAlpha=0.25; ctx.strokeStyle='#8a5cff'; for(let x=0;x<canvas.width;x+=32*DPR){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();} for(let y=0;y<canvas.height;y+=32*DPR){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();} ctx.restore();}
+    if(state.world==='violeta'){const g=ctx.createLinearGradient(0,0,canvas.width,canvas.height); g.addColorStop(0,`rgba(${Math.floor(90*tint)},${Math.floor(35*tint)},140,1)`); g.addColorStop(1,`rgba(${Math.floor(35*tint)},${Math.floor(10*tint)},70,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);} else if(state.world==='tierra'){const g=ctx.createLinearGradient(0,0,0,canvas.height); g.addColorStop(0,`rgba(135,200,${Math.floor(130*tint)},1)`); g.addColorStop(1,`rgba(40,110,45,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);} else {ctx.fillStyle='#111325'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.save(); ctx.globalAlpha=0.25; ctx.strokeStyle='#8a5cff'; for(let x=0;x<canvas.width;x+=32*DPR){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();} for(let y=0;y<canvas.height;y+=32*DPR){ctx.beginPath();ctx.MoveTo; ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();} ctx.restore();}
 
     // Escala
     ctx.save(); ctx.scale(sx(),sy());
@@ -213,30 +255,38 @@
   function step(){const now=performance.now(); const dt=Math.min(0.033,(now-state.lastTime)/1000); state.lastTime=now; if(!state.paused && !state.gameOver) update(dt); render(state.paused); const fps=1/dt; fpsSmoothed=fpsSmoothed*0.9+fps*0.1; fpsEl.textContent='FPS: '+fpsSmoothed.toFixed(0); requestAnimationFrame(step);}  
 
   function update(dt){
-    // Movement
-    let ax=0,ay=0; if(keys.has('w')||keys.has('arrowup')) ay-=1; if(keys.has('s')||keys.has('arrowdown')) ay+=1; if(keys.has('a')||keys.has('arrowleft')) ax-=1; if(keys.has('d')||keys.has('arrowright')) ax+=1; const d=norm(ax,ay); player.pos.x+=d.x*player.speed*dt; player.pos.y+=d.y*player.speed*dt;
-    // Borders
+    // CD habilidades
+    if(abilities.dash.cd>0) abilities.dash.cd-=dt; if(abilities.dash.cd<0) abilities.dash.cd=0;
+    if(abilities.twin.cd>0) abilities.twin.cd-=dt; if(abilities.twin.cd<0) abilities.twin.cd=0;
+    if(abilities.burst.cd>0) abilities.burst.cd-=dt; if(abilities.burst.cd<0) abilities.burst.cd=0;
+    if(abilities.activeBurst){ abilities.activeBurst.t-=dt; if(abilities.activeBurst.t<=0 && abilities.activeBurst.remain>0){ shoot(abilities.activeBurst.base); abilities.activeBurst.remain--; abilities.activeBurst.t=abilities.activeBurst.interval; } if(abilities.activeBurst.remain<=0){ abilities.activeBurst=null; } }
+
+    // Movimiento
+    let ax=0,ay=0; if(keys.has('w')||keys.has('arrowup')) ay-=1; if(keys.has('s')||keys.has('arrowdown')) ay+=1; if(keys.has('a')||keys.has('arrowleft')) ax-=1; if(keys.has('d')||keys.has('arrowright')) ax+=1;
+    const d=norm(ax,ay); player.pos.x+=d.x*player.speed*dt; player.pos.y+=d.y*player.speed*dt;
+
+    // Bordes/Transición de cuadrantes
     if(player.pos.x<0){ if(state.qx===WORLD_BOUNDS.minX){player.pos.x=0;} else {tryMoveQuadrant(-1,0,'left');} }
     if(player.pos.x>QUAD_SIZE.w){ if(state.qx===WORLD_BOUNDS.maxX){player.pos.x=QUAD_SIZE.w;} else {tryMoveQuadrant(1,0,'right');} }
     if(player.pos.y<0){ if(state.qy===WORLD_BOUNDS.minY){player.pos.y=0;} else {tryMoveQuadrant(0,-1,'up');} }
     if(player.pos.y>QUAD_SIZE.h){ if(state.qy===WORLD_BOUNDS.maxY){player.pos.y=QUAD_SIZE.h;} else {tryMoveQuadrant(0,1,'down');} }
-    // Shooting
+
+    // Disparo base
     if(mouse.down) shoot(); if(player.fireCooldown>0) player.fireCooldown-=dt;
-    // Arrows
+
+    // Flechas
     for(let i=state.arrows.length-1;i>=0;i--){const a=state.arrows[i]; a.x+=a.vx*dt; a.y+=a.vy*dt; a.life-=dt; if(a.x<-40||a.x>QUAD_SIZE.w+40||a.y<-40||a.y>QUAD_SIZE.h+40||a.life<=0) state.arrows.splice(i,1);}
-    // Boss & damage
+
+    // Boss y daño
     updateBoss(dt);
+
     // I-frames
     if(player.inv>0){ player.inv-=dt; if(player.inv<0) player.inv=0; }
   }
 
-  // ===================== Tests & Start =====================
-  function runTests(){const cases=[{in:[0,7],out:'A1'},{in:[7,7],out:'H1'},{in:[0,0],out:'A8'},{in:[7,0],out:'H8'},{in:[3,4],out:'D4'},{in:[-2,10],out:'A1'}]; let pass=0; for(const c of cases){ if(quadName(c.in[0],c.in[1])===c.out) pass++; } testsEl.textContent=`Tests: ${pass}/${cases.length}`;}
-
-  worldSelect.value=state.world; // Sync selector
-  updateBadges();
-  runTests();
-  requestAnimationFrame(step);
+  // ===================== Start =====================
+  function init(){ worldSelect.value=state.world; updateBossBadge(); requestAnimationFrame(step); }
+  init();
 })();
 </script>
 </body>
