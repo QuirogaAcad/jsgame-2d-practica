@@ -5,9 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Astr0 — Plantilla de Mundo por Cuadrantes (HTML Canvas)</title>
   <style>
-    /* ————————————————————————————————————————————————————————————
-       ESTILOS BÁSICOS DE UI (no afectan la lógica del juego)
-       ———————————————————————————————————————————————————————————— */
+    /* UI básica */
     html,body{height:100%;margin:0;background:#0b1020;color:#e6eef8;font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif}
     #game{display:block;width:100vw;height:100vh;touch-action:none}
     .ui{position:fixed;left:12px;top:12px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);padding:10px 12px;border-radius:10px;font-size:13px;z-index:10;border:1px solid rgba(255,255,255,.08)}
@@ -19,13 +17,15 @@
     .credits{position:fixed;right:12px;bottom:12px;color:#9fb0d9;font-size:12px;background:rgba(0,0,0,.35);padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.08)}
     .btn{cursor:pointer;background:#1f2d4d;border:1px solid #2b3f6b;color:#cfe0ff;padding:4px 8px;border-radius:8px;font-size:12px}
     .btn.active{outline:2px solid #7aa2ff}
+    /* Botón de reinicio para GAME OVER */
+    #restartBtn{display:none;position:fixed;top:55%;left:50%;transform:translate(-50%,-50%);padding:12px 20px;font-size:16px;background:#1f2d4d;color:#fff;border:2px solid #7aa2ff;border-radius:10px;cursor:pointer;z-index:20}
   </style>
 </head>
 <body>
   <!-- Canvas de juego -->
   <canvas id="game"></canvas>
 
-  <!-- HUD simple para seleccionar mundo y ver estado -->
+  <!-- HUD -->
   <div class="ui">
     <h1>🧑‍🚀 Astr0 — Mundo por cuadrantes (Plantilla)</h1>
     <div class="row" style="margin-bottom:6px">
@@ -44,28 +44,17 @@
       <div><kbd>WASD</kbd> mover • clic izq: disparar • mouse: apuntar</div>
       <div><kbd>E</kbd> teletransportar cuadrante aleatorio • bordes duros 8×8</div>
       <div><kbd>P</kbd> pausa / reanudar • Teclas <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> para cambiar de mundo</div>
-      <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> (❤️❤️❤️).</div>
+      <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
     </div>
   </div>
-  <div class="credits">v0.8 — Daño por contacto, 3 vidas con corazones, borde cromático por mundo, renombrado a “Neón Nexus”</div>
+  <div class="credits">v1.0 — Fix de arranque, corazones grandes y separados, GAME OVER + botón reinicio</div>
+  <button id="restartBtn">Reiniciar Juego</button>
 
 <script>
 (() => {
-  // ======================================================================
-  //  PLANTILLA DIDÁCTICA — Cómo está organizado este prototipo
-  //  - Sección 1: Inicialización de canvas y helpers gráficos
-  //  - Sección 2: Definición de mundo por cuadrantes (8×8) y 3 mundos
-  //  - Sección 3: Entrada de usuario (teclado/mouse) y HUD
-  //  - Sección 4: Entidades: jugador, flechas, bosses y vidas
-  //  - Sección 5: Lógica de movimiento entre cuadrantes + muros visibles
-  //  - Sección 6: Render (fondos, decor, jugador, flechas, muros, minimapa, corazones)
-  //  - Sección 7: Bucle de juego (update/render) + pausa con P
-  //  - Sección 8: Tests rápidos para verificar el mapeo A1–H8
-  // ======================================================================
-
-  // ————————————————————————————————————————————————————————————
-  // Sección 1 — Canvas y utilidades matemáticas
-  // ————————————————————————————————————————————————————————————
+  // ================================================================
+  // Sección 1 — Canvas y helpers
+  // ================================================================
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
@@ -75,487 +64,335 @@
     canvas.style.width  = window.innerWidth  + 'px';
     canvas.style.height = window.innerHeight + 'px';
   }
-  window.addEventListener('resize', resize);
-  resize();
+  window.addEventListener('resize', resize); resize();
 
-  // Helpers matemáticos básicos
-  const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
-  const len   = (x,y)=> Math.hypot(x,y);
-  const norm  = (x,y)=> { const L = len(x,y)||1; return {x:x/L,y:y/L}; };
-  function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
-  // RNG determinista/aleatorio
-  function hash2i(x, y){ let h = x * 374761393 + y * 668265263; h = (h ^ (h >> 13)) * 1274126177; return (h ^ (h >> 16)) >>> 0; }
-  function mulberry32(a){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; } }
-  const RND = mulberry32((Date.now() & 0xffffffff) ^ Math.floor(Math.random()*1e9));
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const len=(x,y)=>Math.hypot(x,y);
+  const norm=(x,y)=>{const L=len(x,y)||1;return{x:x/L,y:y/L}};
+  const dist2=(ax,ay,bx,by)=>{const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy};
+  function hash2i(x,y){let h=x*374761393+y*668265263;h=(h^(h>>13))*1274126177;return (h^(h>>16))>>>0}
+  function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
+  const RND = mulberry32((Date.now()&0xffffffff)^Math.floor(Math.random()*1e9));
 
-  // ————————————————————————————————————————————————————————————
-  // Sección 2 — Mundo de cuadrantes (8×8) y 3 mundos con estilos distintos
-  // ————————————————————————————————————————————————————————————
-  const QUAD_SIZE   = { w: 1920, h: 1080 };       // tamaño lógico de cada cuadrante
-  const WORLD_BOUNDS= { minX:0,maxX:7,minY:0,maxY:7 }; // tablero de 8×8
-
-  const WORLDS = {
-    violeta: { id:'violeta', label:'Violeta‑01', palette:'violet'   },
-    tierra:  { id:'tierra',  label:'Tierra‑01',  palette:'earth'    },
-    neon:    { id:'neon',    label:'Neón Nexus', palette:'neon'     }
+  // ================================================================
+  // Sección 2 — Mundo 8×8 y estado
+  // ================================================================
+  const QUAD_SIZE={w:1920,h:1080};
+  const WORLD_BOUNDS={minX:0,maxX:7,minY:0,maxY:7};
+  const WORLDS={
+    violeta:{id:'violeta',label:'Violeta‑01',palette:'violet'},
+    tierra:{id:'tierra',label:'Tierra‑01',palette:'earth'},
+    neon:{id:'neon',label:'Neón Nexus',palette:'neon'}
   };
 
-  // Estado global del juego
-  const state = {
-    world: 'violeta',           // mundo actual
-    qx: 0, qy: 7,               // cuadrante actual (A1)
-    paused: false,              // pausa (toggle con P)
-    arrows: [],                 // flechas activas
-    lastTime: performance.now(),
+  const state={
+    world:'violeta', qx:0, qy:7,
+    paused:false, arrows:[], lastTime:performance.now(),
     gameOver:false
   };
 
-  // Conversión de índice (qx,qy) a notación tipo ajedrez (A1..H8)
-  function quadName(qx = state.qx, qy = state.qy){
-    const file = String.fromCharCode(65 + clamp(qx,0,7)); // 65='A'
-    const rank = 8 - clamp(qy,0,7);                       // 8..1 de arriba a abajo
+  function quadName(qx=state.qx,qy=state.qy){
+    const file=String.fromCharCode(65+clamp(qx,0,7));
+    const rank=8-clamp(qy,0,7);
     return `${file}${rank}`;
   }
 
-  // ————————————————————————————————————————————————————————————
-  // Sección 3 — Entrada de usuario (teclado/mouse) y HUD
-  // ————————————————————————————————————————————————————————————
-  const worldEl = document.getElementById('world');
-  const quadEl  = document.getElementById('quad');
-  const fpsEl   = document.getElementById('fps');
-  const testsEl = document.getElementById('tests');
-  const bossEl  = document.getElementById('boss');
-  const worldVBtn = document.getElementById('worldV');
-  const worldEBtn = document.getElementById('worldE');
-  const worldNBtn = document.getElementById('worldN');
+  // HUD refs
+  const worldEl=document.getElementById('world');
+  const quadEl=document.getElementById('quad');
+  const fpsEl=document.getElementById('fps');
+  const testsEl=document.getElementById('tests');
+  const bossEl=document.getElementById('boss');
+  const worldVBtn=document.getElementById('worldV');
+  const worldEBtn=document.getElementById('worldE');
+  const worldNBtn=document.getElementById('worldN');
+  const restartBtn=document.getElementById('restartBtn');
 
-  const keys = new Set();
-  const mouse = { x:0, y:0, down:false };
+  const keys=new Set();
+  const mouse={x:0,y:0,down:false};
 
-  window.addEventListener('keydown', (e)=>{
-    const k = e.key.toLowerCase();
-    keys.add(k);
-    // Pausa/reanudar con protección de repetición
-    if(k === 'p' && !e.repeat) state.paused = !state.paused;
-    if(k === '1') selectWorld('violeta');
-    if(k === '2') selectWorld('tierra');
-    if(k === '3') selectWorld('neon');
+  window.addEventListener('keydown',e=>{
+    const k=e.key.toLowerCase(); keys.add(k);
+    if(k==='p'&&!e.repeat) state.paused=!state.paused;
+    if(k==='1') selectWorld('violeta');
+    if(k==='2') selectWorld('tierra');
+    if(k==='3') selectWorld('neon');
   });
-  window.addEventListener('keyup',   (e)=>{ keys.delete(e.key.toLowerCase()); });
-  canvas.addEventListener('pointermove', (e)=>{
-    const r = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - r.left) * DPR;
-    mouse.y = (e.clientY - r.top ) * DPR;
+  window.addEventListener('keyup',e=>{keys.delete(e.key.toLowerCase());});
+  canvas.addEventListener('pointermove',e=>{
+    const r=canvas.getBoundingClientRect();
+    mouse.x=(e.clientX-r.left)*DPR; mouse.y=(e.clientY-r.top)*DPR;
   });
-  canvas.addEventListener('pointerdown', ()=>{ mouse.down = true; });
-  canvas.addEventListener('pointerup',   ()=>{ mouse.down = false; });
-  canvas.addEventListener('pointerleave',()=>{ mouse.down = false; });
-  canvas.addEventListener('contextmenu', (e)=> e.preventDefault());
+  canvas.addEventListener('pointerdown',()=>{mouse.down=true;});
+  canvas.addEventListener('pointerup',()=>{mouse.down=false;});
+  canvas.addEventListener('pointerleave',()=>{mouse.down=false;});
+  canvas.addEventListener('contextmenu',e=>e.preventDefault());
 
-  worldVBtn.addEventListener('click', ()=> selectWorld('violeta'));
-  worldEBtn.addEventListener('click', ()=> selectWorld('tierra'));
-  worldNBtn.addEventListener('click', ()=> selectWorld('neon'));
+  worldVBtn.addEventListener('click',()=>selectWorld('violeta'));
+  worldEBtn.addEventListener('click',()=>selectWorld('tierra'));
+  worldNBtn.addEventListener('click',()=>selectWorld('neon'));
+  restartBtn.addEventListener('click',()=>{
+    resetPlayer();
+  });
 
   function updateBadges(){
-    worldEl.textContent = `Mundo: ${WORLDS[state.world].label}`;
-    quadEl.textContent  = `Cuadrante: ${quadName()}`;
-    const b = bosses[state.world];
-    bossEl.textContent  = `Boss: ${b.alive ? quadName(b.qx,b.qy) : 'Derrotado'}`;
+    worldEl.textContent=`Mundo: ${WORLDS[state.world].label}`;
+    quadEl.textContent=`Cuadrante: ${quadName()}`;
+    const b=bosses[state.world];
+    bossEl.textContent=`Boss: ${b.alive?quadName(b.qx,b.qy):'Derrotado'}`;
     worldVBtn.classList.toggle('active', state.world==='violeta');
     worldEBtn.classList.toggle('active', state.world==='tierra');
     worldNBtn.classList.toggle('active', state.world==='neon');
   }
 
-  // ————————————————————————————————————————————————————————————
-  // Sección 4 — Entidades: jugador, flechas, bosses y vidas
-  // ————————————————————————————————————————————————————————————
-  const player = {
-    pos: { x: QUAD_SIZE.w/2, y: QUAD_SIZE.h/2 },
-    speed: 360,
-    radius: 14,
-    fireCooldown: 0,
-    fireRate: 0.18,
-    hpMax: 3,
-    hp: 3,
-    inv: 0 // invulnerabilidad (i-frames) tras golpe
+  // ================================================================
+  // Sección 3 — Entidades
+  // ================================================================
+  const player={
+    pos:{x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2},
+    speed:360, radius:14,
+    fireCooldown:0, fireRate:0.18,
+    hpMax:3, hp:3, inv:0
   };
 
   function resetPlayer(){
-    player.hp = player.hpMax; player.inv = 0; state.gameOver=false;
-    player.pos.x = QUAD_SIZE.w/2; player.pos.y = QUAD_SIZE.h/2;
+    player.hp=player.hpMax; player.inv=0; state.gameOver=false; state.paused=false;
+    player.pos.x=QUAD_SIZE.w/2; player.pos.y=QUAD_SIZE.h/2;
+    restartBtn.style.display='none';
   }
 
-  // Disparo simple en dirección del cursor
   function shoot(){
-    if(player.fireCooldown > 0 || state.gameOver) return;
+    if(player.fireCooldown>0||state.gameOver) return;
     const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-    const v = { x: mouse.x - p.x, y: mouse.y - p.y };
-    const d = norm(v.x, v.y);
-    const speed = 900;
-    state.arrows.push({ x: player.pos.x, y: player.pos.y, vx: d.x*speed, vy: d.y*speed, life: 1.2 });
-    player.fireCooldown = player.fireRate;
+    const v = {x:mouse.x-p.x,y:mouse.y-p.y};
+    const d = norm(v.x,v.y); const speed=900;
+    state.arrows.push({x:player.pos.x,y:player.pos.y,vx:d.x*speed,vy:d.y*speed,life:1.2});
+    player.fireCooldown=player.fireRate;
   }
 
-  // Bosses (un objeto por mundo)
-  const bosses = {};
+  const bosses={};
   function spawnBossFor(worldId){
-    let bx = Math.floor(RND()*8), by = Math.floor(RND()*8);
-    if(bx === 0 && by === 7) bx = (bx+1)%8; // evita A1
-    return { world: worldId, qx: bx, qy: by, alive: true, x: QUAD_SIZE.w/2, y: QUAD_SIZE.h/2, r:32, hp:100, t:0 };
+    let bx=Math.floor(RND()*8), by=Math.floor(RND()*8);
+    if(bx===0&&by===7) bx=(bx+1)%8;
+    return {world:worldId,qx:bx,qy:by,alive:true,x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2,r:32,hp:100,t:0};
   }
-  bosses.violeta = spawnBossFor('violeta');
-  bosses.tierra  = spawnBossFor('tierra');
-  bosses.neon    = spawnBossFor('neon');
+  bosses.violeta=spawnBossFor('violeta');
+  bosses.tierra =spawnBossFor('tierra');
+  bosses.neon   =spawnBossFor('neon');
 
   function updateBoss(dt){
-    const b = bosses[state.world];
-    if(!b.alive) return;
-    if(state.qx !== b.qx || state.qy !== b.qy) return;
-    b.t += dt;
-    const cfg = {
-      violeta: { R:120, w:1.2, k:0.6 },
-      tierra:  { R:110, w:0.9, k:0.8 },
-      neon:    { R:140, w:1.5, k:1.0 }
-    }[state.world];
-    b.x = QUAD_SIZE.w/2 + Math.cos(b.t*cfg.w)*cfg.R;
-    b.y = QUAD_SIZE.h/2 + Math.sin(b.t*cfg.w)*cfg.R*cfg.k;
+    const b=bosses[state.world]; if(!b.alive) return; if(state.qx!==b.qx||state.qy!==b.qy) return; b.t+=dt;
+    const cfg={violeta:{R:120,w:1.2,k:0.6},tierra:{R:110,w:0.9,k:0.8},neon:{R:140,w:1.5,k:1.0}}[state.world];
+    b.x=QUAD_SIZE.w/2+Math.cos(b.t*cfg.w)*cfg.R; b.y=QUAD_SIZE.h/2+Math.sin(b.t*cfg.w)*cfg.R*cfg.k;
 
-    // Golpe por flecha
-    for(let i=state.arrows.length-1;i>=0;i--){
-      const a = state.arrows[i];
-      if(dist2(a.x,a.y,b.x,b.y) <= (b.r+6)*(b.r+6)){
-        b.hp -= 10; state.arrows.splice(i,1);
-        if(b.hp <= 0){ b.alive = false; bossEl.textContent = 'Boss: Derrotado'; break; }
-      }
+    // Hit por flecha
+    for(let i=state.arrows.length-1;i>=0;i--){const a=state.arrows[i];
+      if(dist2(a.x,a.y,b.x,b.y)<= (b.r+6)*(b.r+6)){b.hp-=10; state.arrows.splice(i,1); if(b.hp<=0){b.alive=false; bossEl.textContent='Boss: Derrotado'; break;}}
     }
 
-    // Daño por contacto al jugador (con i-frames)
-    if(player.inv>0) return;
-    if(dist2(player.pos.x,player.pos.y,b.x,b.y) <= (player.radius + b.r)*(player.radius + b.r)){
-      player.hp -= 1; player.inv = 1.2; // 1.2s de invulnerabilidad
-      // Knockback suave
-      const away = norm(player.pos.x - b.x, player.pos.y - b.y);
-      player.pos.x += away.x * 28; player.pos.y += away.y * 28;
-      if(player.hp <= 0){ state.gameOver = true; }
+    // Daño por contacto (con i-frames)
+    if(player.inv<=0 && dist2(player.pos.x,player.pos.y,b.x,b.y) <= (player.radius+b.r)*(player.radius+b.r)){
+      player.hp-=1; player.inv=1.2; const away=norm(player.pos.x-b.x,player.pos.y-b.y); player.pos.x+=away.x*28; player.pos.y+=away.y*28;
+      if(player.hp<=0){ state.gameOver=true; restartBtn.style.display='block'; }
     }
   }
 
   function renderBoss(){
-    const b = bosses[state.world];
-    if(!b.alive) return;
-    if(state.qx !== b.qx || state.qy !== b.qy) return;
-    const color = state.world==='violeta' ? '#ff6565' : state.world==='tierra' ? '#ffd166' : '#8a5cff';
-    const bar   = state.world==='violeta' ? '#ff9090' : state.world==='tierra' ? '#ffe09a' : '#c3a3ff';
-    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#0b1020'; ctx.beginPath(); ctx.arc(b.x, b.y-6, b.r*0.35, 0, Math.PI*2); ctx.fill();
-    const W=240,H=12,X=(QUAD_SIZE.w-W)/2,Y=28; // barra de vida
-    ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(X,Y,W,H);
-    ctx.fillStyle=bar; ctx.fillRect(X,Y,W*(b.hp/100),H);
-    ctx.strokeStyle='rgba(255,255,255,0.4)'; ctx.strokeRect(X,Y,W,H);
+    const b=bosses[state.world]; if(!b.alive) return; if(state.qx!==b.qx||state.qy!==b.qy) return;
+    const color= state.world==='violeta'? '#ff6565' : state.world==='tierra'? '#ffd166' : '#8a5cff';
+    const bar  = state.world==='violeta'? '#ff9090' : state.world==='tierra'? '#ffe09a' : '#c3a3ff';
+    ctx.fillStyle=color; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#0b1020'; ctx.beginPath(); ctx.arc(b.x,b.y-6,b.r*0.35,0,Math.PI*2); ctx.fill();
+    const W=240,H=12,X=(QUAD_SIZE.w-W)/2,Y=28; ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(X,Y,W,H);
+    ctx.fillStyle=bar; ctx.fillRect(X,Y,W*(b.hp/100),H); ctx.strokeStyle='rgba(255,255,255,0.4)'; ctx.strokeRect(X,Y,W,H);
   }
 
-  // ————————————————————————————————————————————————————————————
-  // Sección 5 — Movimiento por cuadrantes, selección de mundo y muros
-  // ————————————————————————————————————————————————————————————
-  function selectWorld(worldId){
-    if(!WORLDS[worldId]) return;
-    state.world = worldId;
-    player.pos.x = QUAD_SIZE.w/2; player.pos.y = QUAD_SIZE.h/2;
-    updateBadges();
-  }
+  // ================================================================
+  // Sección 4 — Movimiento y transición de cuadrantes
+  // ================================================================
+  function selectWorld(worldId){ if(!WORLDS[worldId]) return; state.world=worldId; player.pos.x=QUAD_SIZE.w/2; player.pos.y=QUAD_SIZE.h/2; updateBadges(); }
 
-  function teleportRandomQuadrant(){
-    let nx, ny; do { nx = Math.floor(RND()*8); ny = Math.floor(RND()*8); } while (nx===state.qx && ny===state.qy);
-    state.qx = nx; state.qy = ny; player.pos.x = QUAD_SIZE.w/2; player.pos.y = QUAD_SIZE.h/2; updateBadges();
-  }
+  function teleportRandomQuadrant(){ let nx,ny; do{ nx=Math.floor(RND()*8); ny=Math.floor(RND()*8);} while(nx===state.qx && ny===state.qy); state.qx=nx; state.qy=ny; player.pos.x=QUAD_SIZE.w/2; player.pos.y=QUAD_SIZE.h/2; updateBadges(); }
 
-  function tryMoveQuadrant(dx, dy, edge){
-    const nx = state.qx + dx, ny = state.qy + dy;
-    if(nx < WORLD_BOUNDS.minX || nx > WORLD_BOUNDS.maxX || ny < WORLD_BOUNDS.minY || ny > WORLD_BOUNDS.maxY){
-      if(edge==='left')  player.pos.x = 0;
-      if(edge==='right') player.pos.x = QUAD_SIZE.w;
-      if(edge==='up')    player.pos.y = 0;
-      if(edge==='down')  player.pos.y = QUAD_SIZE.h;
-      return;
+  function tryMoveQuadrant(dx,dy,edge){ const nx=state.qx+dx, ny=state.qy+dy;
+    if(nx<WORLD_BOUNDS.minX||nx>WORLD_BOUNDS.maxX||ny<WORLD_BOUNDS.minY||ny>WORLD_BOUNDS.maxY){
+      if(edge==='left') player.pos.x=0; if(edge==='right') player.pos.x=QUAD_SIZE.w; if(edge==='up') player.pos.y=0; if(edge==='down') player.pos.y=QUAD_SIZE.h; return;
     }
-    state.qx = nx; state.qy = ny;
-    if(edge==='right') player.pos.x = 10;
-    if(edge==='left')  player.pos.x = QUAD_SIZE.w-10;
-    if(edge==='down')  player.pos.y = 10;
-    if(edge==='up')    player.pos.y = QUAD_SIZE.h-10;
-    updateBadges();
+    state.qx=nx; state.qy=ny;
+    if(edge==='right') player.pos.x=10; if(edge==='left') player.pos.x=QUAD_SIZE.w-10; if(edge==='down') player.pos.y=10; if(edge==='up') player.pos.y=QUAD_SIZE.h-10; updateBadges();
   }
 
-  function drawWorldWalls(){
-    const wallW = 10;
-    ctx.save();
-    const grad = ctx.createLinearGradient(0,0,wallW,0);
-    grad.addColorStop(0,'#ff3b3b'); grad.addColorStop(1,'#ffb3b3');
-    ctx.fillStyle = grad;
-    if(state.qy === WORLD_BOUNDS.minY){ ctx.fillRect(0, 0, QUAD_SIZE.w, wallW); }
-    if(state.qy === WORLD_BOUNDS.maxY){ ctx.fillRect(0, QUAD_SIZE.h-wallW, QUAD_SIZE.w, wallW); }
-    if(state.qx === WORLD_BOUNDS.minX){ ctx.fillRect(0, 0, wallW, QUAD_SIZE.h); }
-    if(state.qx === WORLD_BOUNDS.maxX){ ctx.fillRect(QUAD_SIZE.w-wallW, 0, wallW, QUAD_SIZE.h); }
+  function drawWorldWalls(){ const wallW=10; ctx.save(); const grad=ctx.createLinearGradient(0,0,wallW,0); grad.addColorStop(0,'#ff3b3b'); grad.addColorStop(1,'#ffb3b3'); ctx.fillStyle=grad;
+    if(state.qy===WORLD_BOUNDS.minY) ctx.fillRect(0,0,QUAD_SIZE.w,wallW);
+    if(state.qy===WORLD_BOUNDS.maxY) ctx.fillRect(0,QUAD_SIZE.h-wallW,QUAD_SIZE.w,wallW);
+    if(state.qx===WORLD_BOUNDS.minX) ctx.fillRect(0,0,wallW,QUAD_SIZE.h);
+    if(state.qx===WORLD_BOUNDS.maxX) ctx.fillRect(QUAD_SIZE.w-wallW,0,wallW,QUAD_SIZE.h);
+    ctx.fillStyle='rgba(230,238,248,0.25)'; const arrow=(x,y,ax,ay)=>{ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-ax*14,y-ay*14);ctx.lineTo(x+ay*14,y-ax*14);ctx.closePath();ctx.fill();};
+    if(state.qy>WORLD_BOUNDS.minY) arrow(QUAD_SIZE.w/2,8,0,-1); if(state.qy<WORLD_BOUNDS.maxY) arrow(QUAD_SIZE.w/2,QUAD_SIZE.h-8,0,1);
+    if(state.qx>WORLD_BOUNDS.minX) arrow(8,QUAD_SIZE.h/2,-1,0); if(state.qx<WORLD_BOUNDS.maxX) arrow(QUAD_SIZE.w-8,QUAD_SIZE.h/2,1,0);
+    ctx.restore(); }
 
-    ctx.fillStyle = 'rgba(230,238,248,0.25)';
-    const arrow = (x,y,ax,ay)=>{ ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-ax*14,y-ay*14); ctx.lineTo(x+ay*14,y-ax*14); ctx.closePath(); ctx.fill(); };
-    if(state.qy > WORLD_BOUNDS.minY) arrow(QUAD_SIZE.w/2, 8, 0,-1);
-    if(state.qy < WORLD_BOUNDS.maxY) arrow(QUAD_SIZE.w/2, QUAD_SIZE.h-8, 0,1);
-    if(state.qx > WORLD_BOUNDS.minX) arrow(8, QUAD_SIZE.h/2, -1,0);
-    if(state.qx < WORLD_BOUNDS.maxX) arrow(QUAD_SIZE.w-8, QUAD_SIZE.h/2, 1,0);
-    ctx.restore();
-  }
+  // ================================================================
+  // Sección 5 — Render y UI en canvas
+  // ================================================================
+  const sx=()=>canvas.width/QUAD_SIZE.w, sy=()=>canvas.height/QUAD_SIZE.h;
+  function worldToScreen(wx,wy){ const ox=state.qx*QUAD_SIZE.w, oy=state.qy*QUAD_SIZE.h; return {x:(wx-ox)*sx(), y:(wy-oy)*sy()}; }
 
-  // ————————————————————————————————————————————————————————————
-  // Sección 6 — Render
-  // ————————————————————————————————————————————————————————————
-  const sx = ()=> canvas.width/QUAD_SIZE.w;  const sy = ()=> canvas.height/QUAD_SIZE.h;
-  function worldToScreen(wx, wy){
-    const ox = state.qx*QUAD_SIZE.w, oy = state.qy*QUAD_SIZE.h;
-    return { x:(wx-ox)*sx(), y:(wy-oy)*sy() };
-  }
-
-  const decorCache = new Map();
-  const decorKey = (worldId,qx,qy)=> `${worldId}:${qx},${qy}`;
-  function genDecorFor(worldId, qx, qy){
-    const offs = worldId==='tierra'? 999 : worldId==='neon'? 2025 : 0;
-    const rnd = mulberry32(hash2i(qx+offs, qy+offs));
-    const rocks=[], plants=[];
-    const countR = 8 + Math.floor(rnd()*10);
-    const countP = 12 + Math.floor(rnd()*12);
-    for(let i=0;i<countR;i++) rocks.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 10 + rnd()*26 });
-    for(let i=0;i<countP;i++) plants.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 6 + rnd()*14 });
-    const tint = worldId==='violeta' ? (0.82 + rnd()*0.16)
-               : worldId==='tierra'  ? (0.90 + rnd()*0.10)
-               : (0.95 + rnd()*0.05);
-    return { worldId, rocks, plants, tint };
-  }
-  function getDecor(worldId,qx,qy){
-    const k = decorKey(worldId,qx,qy);
-    if(!decorCache.has(k)) decorCache.set(k, genDecorFor(worldId,qx,qy));
-    return decorCache.get(k);
-  }
+  const decorCache=new Map(); const decorKey=(worldId,qx,qy)=>`${worldId}:${qx},${qy}`;
+  function genDecorFor(worldId,qx,qy){ const offs=worldId==='tierra'?999:worldId==='neon'?2025:0; const rnd=mulberry32(hash2i(qx+offs,qy+offs));
+    const rocks=[],plants=[]; const countR=8+Math.floor(rnd()*10), countP=12+Math.floor(rnd()*12);
+    for(let i=0;i<countR;i++) rocks.push({x:rnd()*QUAD_SIZE.w,y:rnd()*QUAD_SIZE.h,r:10+rnd()*26});
+    for(let i=0;i<countP;i++) plants.push({x:rnd()*QUAD_SIZE.w,y:rnd()*QUAD_SIZE.h,r:6+rnd()*14});
+    const tint=worldId==='violeta'?(0.82+rnd()*0.16):worldId==='tierra'?(0.90+rnd()*0.10):(0.95+rnd()*0.05);
+    return {worldId,rocks,plants,tint}; }
+  function getDecor(worldId,qx,qy){ const k=decorKey(worldId,qx,qy); if(!decorCache.has(k)) decorCache.set(k,genDecorFor(worldId,qx,qy)); return decorCache.get(k); }
 
   function drawMinimap(){
-    const pad = 12 * DPR, cell = 14 * DPR, cols=8, rows=8, w=cols*cell, h=rows*cell;
-    const x0 = canvas.width - pad - w, y0 = pad + 12*DPR;
-    const b = bosses[state.world];
-
+    const pad=12*DPR, cell=14*DPR, cols=8, rows=8, w=cols*cell, h=rows*cell;
+    const x0=canvas.width - pad - w, y0=pad + 12*DPR;
+    const b=bosses[state.world];
     ctx.save();
     ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(x0-6*DPR, y0-18*DPR, w+12*DPR, h+30*DPR);
     ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=2*DPR; ctx.strokeRect(x0-6*DPR, y0-18*DPR, w+12*DPR, h+30*DPR);
-
-    for(let gy=0; gy<rows; gy++){
-      for(let gx=0; gx<cols; gx++){
-        const light = ((gx+gy)%2)===0; ctx.fillStyle = light?'rgba(230,238,248,0.18)':'rgba(230,238,248,0.08)';
-        const cx = x0 + gx*cell, cy = y0 + gy*cell; ctx.fillRect(cx,cy,cell,cell);
-        if(b.alive && gx===b.qx && gy===b.qy){
-          ctx.fillStyle = state.world==='violeta' ? 'rgba(255,80,80,0.9)'
-                       : state.world==='tierra'  ? 'rgba(255,180,60,0.95)'
-                       : 'rgba(170,120,255,0.95)';
-          ctx.beginPath(); ctx.arc(cx+cell/2, cy+cell/2, 3.5*DPR, 0, Math.PI*2); ctx.fill();
-        }
-        if(gx===state.qx && gy===state.qy){ ctx.strokeStyle='rgba(177,198,255,0.9)'; ctx.lineWidth=2*DPR; ctx.strokeRect(cx+2*DPR, cy+2*DPR, cell-4*DPR, cell-4*DPR); }
-      }
+    for(let gy=0;gy<rows;gy++) for(let gx=0;gx<cols;gx++){
+      const light=((gx+gy)%2)===0; ctx.fillStyle=light?'rgba(230,238,248,0.18)':'rgba(230,238,248,0.08)';
+      const cx=x0+gx*cell, cy=y0+gy*cell; ctx.fillRect(cx,cy,cell,cell);
+      if(b.alive && gx===b.qx && gy===b.qy){ ctx.fillStyle= state.world==='violeta'?'rgba(255,80,80,0.9)': state.world==='tierra'?'rgba(255,180,60,0.95)':'rgba(170,120,255,0.95)'; ctx.beginPath(); ctx.arc(cx+cell/2, cy+cell/2, 3.5*DPR, 0, Math.PI*2); ctx.fill(); }
+      if(gx===state.qx && gy===state.qy){ ctx.strokeStyle='rgba(177,198,255,0.9)'; ctx.lineWidth=2*DPR; ctx.strokeRect(cx+2*DPR, cy+2*DPR, cell-4*DPR, cell-4*DPR); }
     }
     ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`;
-    ctx.textAlign='center'; for(let gx=0; gx<cols; gx++){ const cx=x0+gx*cell+cell/2; ctx.fillText(String.fromCharCode(65+gx), cx, y0-6*DPR); }
-    ctx.textAlign='right';  for(let gy=0; gy<rows; gy++){ const cy=y0+gy*cell+cell/2+4*DPR; ctx.fillText(String(8-gy), x0-6*DPR, cy); }
+    ctx.textAlign='center'; for(let gx=0;gx<cols;gx++){ const cx=x0+gx*cell+cell/2; ctx.fillText(String.fromCharCode(65+gx), cx, y0-6*DPR); }
+    ctx.textAlign='right';  for(let gy=0;gy<rows;gy++){ const cy=y0+gy*cell+cell/2+4*DPR; ctx.fillText(String(8-gy), x0-6*DPR, cy); }
     ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(11*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='right'; ctx.fillText(quadName(), x0+w+4*DPR, y0+h+18*DPR);
     ctx.restore();
 
-    // Corazones (vidas) — arriba, junto al minimapa
-    drawHearts(x0 - 8*DPR, y0 - 10*DPR);
+    // Corazones (vidas) — más grandes y alejados del minimapa
+    drawHearts(x0 - 28*DPR, y0 + 8*DPR);
   }
 
   function drawHearts(xRight, yTop){
-    const n = player.hpMax; const size = 12*DPR; const gap = 6*DPR;
+    const n=player.hpMax; const size=24*DPR; const gap=12*DPR; // doble tamaño y más separación
     for(let i=0;i<n;i++){
-      const filled = i < player.hp;
-      const x = xRight - (n-i-1)*(size+gap);
-      heartIcon(x, yTop - 10*DPR, size, filled ? '#ff5d73' : 'rgba(255,255,255,0.25)');
+      const filled=i<player.hp; const x=xRight - (n-i-1)*(size+gap);
+      heartIcon(x, yTop, size, filled ? '#ff5d73' : 'rgba(255,255,255,0.25)');
     }
   }
-  function heartIcon(x,y,s,color){
-    const w=s, h=s; ctx.save(); ctx.translate(x,y);
-    ctx.fillStyle=color; ctx.beginPath();
-    ctx.moveTo(0, h*0.3);
-    ctx.bezierCurveTo(0,0, w*0.5,0, w*0.5,h*0.35);
-    ctx.bezierCurveTo(w*0.5,0, w,0, w,h*0.3);
-    ctx.bezierCurveTo(w,h*0.7, w*0.5,h, w*0.5,h);
-    ctx.bezierCurveTo(w*0.5,h, 0,h*0.7, 0,h*0.3);
-    ctx.closePath(); ctx.fill(); ctx.restore();
-  }
+  function heartIcon(x,y,s,color){ ctx.save(); ctx.translate(x,y); ctx.fillStyle=color; ctx.beginPath();
+    ctx.moveTo(0, s*0.35);
+    ctx.bezierCurveTo(0,0, s*0.5,0, s*0.5,s*0.35);
+    ctx.bezierCurveTo(s*0.5,0, s,0, s,s*0.35);
+    ctx.bezierCurveTo(s,s*0.75, s*0.5,s, s*0.5,s);
+    ctx.bezierCurveTo(s*0.5,s, 0,s*0.75, 0,s*0.35);
+    ctx.closePath(); ctx.fill(); ctx.restore(); }
 
   function render(paused=false){
-    const decor = getDecor(state.world, state.qx, state.qy);
-    const tint  = decor.tint;
-
-    // Fondo por mundo
+    const decor=getDecor(state.world,state.qx,state.qy); const tint=decor.tint;
+    // Fondos
     ctx.clearRect(0,0,canvas.width,canvas.height);
     if(state.world==='violeta'){
-      const g = ctx.createLinearGradient(0,0,canvas.width,canvas.height);
-      g.addColorStop(0, `rgba(${Math.floor(90*tint)}, ${Math.floor(35*tint)}, 140, 1)`);
-      g.addColorStop(1, `rgba(${Math.floor(35*tint)}, ${Math.floor(10*tint)}, 70, 1)`);
-      ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
+      const g=ctx.createLinearGradient(0,0,canvas.width,canvas.height); g.addColorStop(0,`rgba(${Math.floor(90*tint)},${Math.floor(35*tint)},140,1)`); g.addColorStop(1,`rgba(${Math.floor(35*tint)},${Math.floor(10*tint)},70,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
     } else if(state.world==='tierra'){
-      const g = ctx.createLinearGradient(0,0,0,canvas.height);
-      g.addColorStop(0, `rgba(135, 200, ${Math.floor(130*tint)}, 1)`);
-      g.addColorStop(1, `rgba(40, 110, 45, 1)`);
-      ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
-    } else { // Neón Nexus
-      ctx.fillStyle = '#111325'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.save(); ctx.globalAlpha=0.25; ctx.strokeStyle='#8a5cff';
+      const g=ctx.createLinearGradient(0,0,0,canvas.height); g.addColorStop(0,`rgba(135,200,${Math.floor(130*tint)},1)`); g.addColorStop(1,`rgba(40,110,45,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
+    } else {
+      ctx.fillStyle='#111325'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.save(); ctx.globalAlpha=0.25; ctx.strokeStyle='#8a5cff';
       for(let x=0;x<canvas.width;x+=32*DPR){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
-      for(let y=0;y<canvas.height;y+=32*DPR){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
-      ctx.restore();
+      for(let y=0;y<canvas.height;y+=32*DPR){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); } ctx.restore();
     }
 
-    // Escala lógica del cuadrante → pantalla
-    ctx.save(); ctx.scale(sx(), sy());
+    // Escala lógica
+    ctx.save(); ctx.scale(sx(),sy());
 
     // Decor
     if(state.world==='violeta'){
-      ctx.globalAlpha=0.7; ctx.fillStyle='rgba(255,255,255,0.08)';
-      for(const r of decor.rocks){ ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.fill(); }
-      ctx.globalAlpha=0.5; ctx.fillStyle='rgba(0,255,200,0.10)';
-      for(const p of decor.plants){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
+      ctx.globalAlpha=0.7; ctx.fillStyle='rgba(255,255,255,0.08)'; for(const r of decor.rocks){ ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.fill(); }
+      ctx.globalAlpha=0.5; ctx.fillStyle='rgba(0,255,200,0.10)'; for(const p of decor.plants){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
     } else if(state.world==='tierra'){
-      ctx.globalAlpha=0.8; ctx.fillStyle='rgba(60,40,20,0.12)';
-      for(const r of decor.rocks){ ctx.beginPath(); ctx.rect(r.x-r.r*0.6, r.y-r.r*0.3, r.r*1.2, r.r*0.6); ctx.fill(); }
-      ctx.globalAlpha=0.6; ctx.fillStyle='rgba(50,200,80,0.15)';
-      for(const p of decor.plants){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r*0.9,0,Math.PI*2); ctx.fill(); }
+      ctx.globalAlpha=0.8; ctx.fillStyle='rgba(60,40,20,0.12)'; for(const r of decor.rocks){ ctx.beginPath(); ctx.rect(r.x-r.r*0.6, r.y-r.r*0.3, r.r*1.2, r.r*0.6); ctx.fill(); }
+      ctx.globalAlpha=0.6; ctx.fillStyle='rgba(50,200,80,0.15)'; for(const p of decor.plants){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r*0.9,0,Math.PI*2); ctx.fill(); }
     } else {
-      ctx.globalAlpha=0.7; ctx.fillStyle='rgba(138,92,255,0.10)';
-      for(const r of decor.rocks){ ctx.beginPath(); ctx.arc(r.x,r.y,r.r*0.9,0,Math.PI*2); ctx.fill(); }
-      ctx.globalAlpha=0.5; ctx.fillStyle='rgba(0,255,255,0.12)';
-      for(const p of decor.plants){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r*1.1,0,Math.PI*2); ctx.fill(); }
+      ctx.globalAlpha=0.7; ctx.fillStyle='rgba(138,92,255,0.10)'; for(const r of decor.rocks){ ctx.beginPath(); ctx.arc(r.x,r.y,r.r*0.9,0,Math.PI*2); ctx.fill(); }
+      ctx.globalAlpha=0.5; ctx.fillStyle='rgba(0,255,255,0.12)'; for(const p of decor.plants){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r*1.1,0,Math.PI*2); ctx.fill(); }
     }
     ctx.globalAlpha=1;
 
     // Flechas
     ctx.strokeStyle='#e6eef8'; ctx.lineWidth=3; ctx.lineCap='round';
-    for(const a of state.arrows){
-      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x - a.vx*0.03, a.y - a.vy*0.03); ctx.stroke();
-      const ang=Math.atan2(a.vy,a.vx); ctx.beginPath(); ctx.moveTo(a.x,a.y);
-      ctx.lineTo(a.x - Math.cos(ang-0.4)*10, a.y - Math.sin(ang-0.4)*10);
-      ctx.lineTo(a.x - Math.cos(ang+0.4)*10, a.y - Math.sin(ang+0.4)*10);
-      ctx.fillStyle='#e6eef8'; ctx.fill();
-    }
+    for(const a of state.arrows){ ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x-a.vx*0.03, a.y-a.vy*0.03); ctx.stroke(); const ang=Math.atan2(a.vy,a.vx); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x-Math.cos(ang-0.4)*10, a.y-Math.sin(ang-0.4)*10); ctx.lineTo(a.x-Math.cos(ang+0.4)*10, a.y-Math.sin(ang+0.4)*10); ctx.fillStyle='#e6eef8'; ctx.fill(); }
 
-    // Jugador (astronauta minimal) — parpadeo si invulnerable
-    ctx.fillStyle = (player.inv>0) ? 'rgba(255,255,255,0.55)' : (paused ? '#8aa8ff' : '#ffffff');
-    ctx.beginPath(); ctx.arc(player.pos.x, player.pos.y, player.radius, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#0b1020'; ctx.beginPath(); ctx.arc(player.pos.x, player.pos.y-3, player.radius*0.55, 0, Math.PI*2); ctx.fill();
+    // Jugador (parpadeo si invulnerable)
+    ctx.fillStyle=(player.inv>0)?'rgba(255,255,255,0.55)':'#ffffff'; if(state.paused) ctx.fillStyle='#8aa8ff';
+    ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y,player.radius,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#0b1020'; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y-3,player.radius*0.55,0,Math.PI*2); ctx.fill();
 
-    // Arco (dirección de mira)
-    const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-    const aim = norm(mouse.x - p.x, mouse.y - p.y); const bowR = player.radius + 6;
-    ctx.strokeStyle='#b1c6ff'; ctx.lineWidth=2.5; ctx.beginPath();
-    ctx.arc(player.pos.x, player.pos.y, bowR, Math.atan2(aim.y,aim.x)-0.9, Math.atan2(aim.y,aim.x)+0.9); ctx.stroke();
+    // Arco
+    const ps=worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h); const aim=norm(mouse.x-ps.x, mouse.y-ps.y); const bowR=player.radius+6;
+    ctx.strokeStyle='#b1c6ff'; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y,bowR, Math.atan2(aim.y,aim.x)-0.9, Math.atan2(aim.y,aim.x)+0.9); ctx.stroke();
 
     // Boss
     renderBoss();
 
     // Marco del cuadrante con color por mundo
-    const worldBorder = state.world==='violeta' ? 'rgba(220,160,255,0.65)'
-                       : state.world==='tierra'  ? 'rgba(120,200,120,0.65)'
-                       : 'rgba(170,120,255,0.70)';
-    ctx.setLineDash([8,6]); ctx.strokeStyle=worldBorder; ctx.lineWidth=2; ctx.strokeRect(4,4,QUAD_SIZE.w-8,QUAD_SIZE.h-8);
-    ctx.setLineDash([]);
+    const worldBorder = state.world==='violeta' ? 'rgba(220,160,255,0.65)' : state.world==='tierra' ? 'rgba(120,200,120,0.65)' : 'rgba(170,120,255,0.70)';
+    ctx.setLineDash([8,6]); ctx.strokeStyle=worldBorder; ctx.lineWidth=2; ctx.strokeRect(4,4,QUAD_SIZE.w-8,QUAD_SIZE.h-8); ctx.setLineDash([]);
 
     // Muros exteriores
     drawWorldWalls();
 
     ctx.restore();
 
-    // Minimap + corazones
+    // Minimap + Corazones
     drawMinimap();
 
     // Overlays
-    if(paused){
-      ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle='#e6eef8'; ctx.font=`${Math.floor(24*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center';
-      ctx.fillText('Pausado', canvas.width/2, canvas.height/2);
-    }
-    if(state.gameOver){
-      ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle='#ff9191'; ctx.font=`${Math.floor(26*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center';
-      ctx.fillText('¡Sin vidas! Recargá la página o cambiá de mundo para reiniciar', canvas.width/2, canvas.height/2);
-    }
-    const b = bosses[state.world];
-    if(!b.alive && !state.gameOver){
-      ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(0,0,canvas.width,40*DPR);
-      ctx.fillStyle='#b4f0b4'; ctx.font=`${Math.floor(16*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center';
-      ctx.fillText('¡MVP derrotado! Cambiá de mundo o recargá para un nuevo spawn', canvas.width/2, 26*DPR);
-    }
+    if(state.paused && !state.gameOver){ ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#e6eef8'; ctx.font=`${Math.floor(24*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.fillText('Pausado', canvas.width/2, canvas.height/2); }
+    if(state.gameOver){ ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#ff9191'; ctx.font=`${Math.floor(46*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2 - 24*DPR); restartBtn.style.display='block'; }
   }
 
-  // ————————————————————————————————————————————————————————————
-  // Sección 7 — Bucle de juego y actualización
-  // ————————————————————————————————————————————————————————————
-  let fpsSmoothed = 60;
+  // ================================================================
+  // Sección 6 — Bucle y lógica
+  // ================================================================
+  let fpsSmoothed=60;
   function step(){
-    const now = performance.now();
-    const dt  = Math.min(0.033, (now - state.lastTime) / 1000);
-    state.lastTime = now;
-
-    if(!state.paused){ update(dt); }
+    const now=performance.now(); const dt=Math.min(0.033,(now-state.lastTime)/1000); state.lastTime=now;
+    if(!state.paused && !state.gameOver) update(dt);
     render(state.paused);
-
-    const fps = 1/dt; fpsSmoothed = fpsSmoothed*0.9 + fps*0.1; fpsEl.textContent = 'FPS: ' + fpsSmoothed.toFixed(0);
+    const fps=1/dt; fpsSmoothed=fpsSmoothed*0.9 + fps*0.1; fpsEl.textContent='FPS: '+fpsSmoothed.toFixed(0);
     requestAnimationFrame(step);
   }
 
   function update(dt){
-    if(state.gameOver) return;
     if(keys.has('e')){ keys.delete('e'); teleportRandomQuadrant(); }
-
     // Movimiento
-    let ax=0, ay=0;
-    if(keys.has('w')||keys.has('arrowup')) ay -= 1;
-    if(keys.has('s')||keys.has('arrowdown')) ay += 1;
-    if(keys.has('a')||keys.has('arrowleft')) ax -= 1;
-    if(keys.has('d')||keys.has('arrowright')) ax += 1;
-    const d = norm(ax, ay);
-    player.pos.x += d.x * player.speed * dt;
-    player.pos.y += d.y * player.speed * dt;
-
-    // Bordes / cambio de cuadrante
-    if(player.pos.x < 0){ if(state.qx===WORLD_BOUNDS.minX){ player.pos.x=0; } else { tryMoveQuadrant(-1,0,'left'); } }
-    if(player.pos.x > QUAD_SIZE.w){ if(state.qx===WORLD_BOUNDS.maxX){ player.pos.x=QUAD_SIZE.w; } else { tryMoveQuadrant(1,0,'right'); } }
-    if(player.pos.y < 0){ if(state.qy===WORLD_BOUNDS.minY){ player.pos.y=0; } else { tryMoveQuadrant(0,-1,'up'); } }
-    if(player.pos.y > QUAD_SIZE.h){ if(state.qy===WORLD_BOUNDS.maxY){ player.pos.y=QUAD_SIZE.h; } else { tryMoveQuadrant(0,1,'down'); } }
+    let ax=0,ay=0; if(keys.has('w')||keys.has('arrowup')) ay-=1; if(keys.has('s')||keys.has('arrowdown')) ay+=1; if(keys.has('a')||keys.has('arrowleft')) ax-=1; if(keys.has('d')||keys.has('arrowright')) ax+=1;
+    const d=norm(ax,ay); player.pos.x += d.x*player.speed*dt; player.pos.y += d.y*player.speed*dt;
+    // Bordes
+    if(player.pos.x<0){ if(state.qx===WORLD_BOUNDS.minX){player.pos.x=0;} else {tryMoveQuadrant(-1,0,'left');} }
+    if(player.pos.x>QUAD_SIZE.w){ if(state.qx===WORLD_BOUNDS.maxX){player.pos.x=QUAD_SIZE.w;} else {tryMoveQuadrant(1,0,'right');} }
+    if(player.pos.y<0){ if(state.qy===WORLD_BOUNDS.minY){player.pos.y=0;} else {tryMoveQuadrant(0,-1,'up');} }
+    if(player.pos.y>QUAD_SIZE.h){ if(state.qy===WORLD_BOUNDS.maxY){player.pos.y=QUAD_SIZE.h;} else {tryMoveQuadrant(0,1,'down');} }
 
     // Disparo
-    if(mouse.down) shoot();
-    if(player.fireCooldown > 0) player.fireCooldown -= dt;
+    if(mouse.down) shoot(); if(player.fireCooldown>0) player.fireCooldown-=dt;
 
-    // Vida de flechas
-    for(let i=state.arrows.length-1;i>=0;i--){
-      const a=state.arrows[i]; a.x+=a.vx*dt; a.y+=a.vy*dt; a.life-=dt;
-      if(a.x<-40||a.x>QUAD_SIZE.w+40||a.y<-40||a.y>QUAD_SIZE.h+40||a.life<=0) state.arrows.splice(i,1);
-    }
+    // Flechas
+    for(let i=state.arrows.length-1;i>=0;i--){ const a=state.arrows[i]; a.x+=a.vx*dt; a.y+=a.vy*dt; a.life-=dt; if(a.x<-40||a.x>QUAD_SIZE.w+40||a.y<-40||a.y>QUAD_SIZE.h+40||a.life<=0) state.arrows.splice(i,1); }
 
-    // Boss y daño por contacto
+    // Boss y daño
     updateBoss(dt);
 
-    // Invulnerabilidad decreciente
-    if(player.inv>0){ player.inv -= dt; if(player.inv<0) player.inv=0; }
+    // I-frames
+    if(player.inv>0){ player.inv-=dt; if(player.inv<0) player.inv=0; }
   }
 
-  // ————————————————————————————————————————————————————————————
-  // Sección 8 — Tests (sanity check de mapeo A1–H8)
-  // ————————————————————————————————————————————————————————————
+  // ================================================================
+  // Sección 7 — Tests y arranque
+  // ================================================================
   function runTests(){
-    const cases = [
-      { in:[0,7], out:'A1' }, { in:[7,7], out:'H1' }, { in:[0,0], out:'A8' }, { in:[7,0], out:'H8' }, { in:[3,4], out:'D4' }, { in:[-2,10], out:'A1' }
-    ];
-    let pass=0; for(const c of cases){ const got = quadName(c.in[0], c.in[1]); if(got===c.out) pass++; }
-    testsEl.textContent = `Tests: ${pass}/${cases.length}`;
+    const cases=[{in:[0,7],out:'A1'},{in:[7,7],out:'H1'},{in:[0,0],out:'A8'},{in:[7,0],out:'H8'},{in:[3,4],out:'D4'},{in:[-2,10],out:'A1'}];
+    let pass=0; for(const c of cases){ if(quadName(c.in[0],c.in[1])===c.out) pass++; }
+    testsEl.textContent=`Tests: ${pass}/${cases.length}`;
   }
 
-  // Inicio — mundo por defecto y loop principal
   selectWorld('violeta');
   runTests();
   updateBadges();
