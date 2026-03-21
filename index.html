@@ -31,7 +31,7 @@
     <div class="row" style="margin-bottom:6px">
       <button class="btn" id="worldV">Planeta Violeta</button>
       <button class="btn" id="worldE">Tierra</button>
-      <button class="btn" id="worldC">Creativo</button>
+      <button class="btn" id="worldN">Neón Nexus</button>
     </div>
     <div class="row">
       <span class="badge" id="world">Mundo: —</span>
@@ -42,12 +42,12 @@
     </div>
     <div class="help">
       <div><kbd>WASD</kbd> mover • clic izq: disparar • mouse: apuntar</div>
-      <div><kbd>E</kbd> teletransportar a un cuadrante <b>aleatorio</b> • bordes duros del 8×8</div>
+      <div><kbd>E</kbd> teletransportar cuadrante aleatorio • bordes duros 8×8</div>
       <div><kbd>P</kbd> pausa / reanudar • Teclas <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> para cambiar de mundo</div>
-      <div>Los <b>muros del borde del mundo</b> son visibles dentro de cada cuadrante.</div>
+      <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> (❤️❤️❤️).</div>
     </div>
   </div>
-  <div class="credits">v0.7 — Fix P (no-repeat), pointerleave, mundos 1/2/3, muros visibles, plantilla comentada</div>
+  <div class="credits">v0.8 — Daño por contacto, 3 vidas con corazones, borde cromático por mundo, renombrado a “Neón Nexus”</div>
 
 <script>
 (() => {
@@ -56,9 +56,9 @@
   //  - Sección 1: Inicialización de canvas y helpers gráficos
   //  - Sección 2: Definición de mundo por cuadrantes (8×8) y 3 mundos
   //  - Sección 3: Entrada de usuario (teclado/mouse) y HUD
-  //  - Sección 4: Entidades: jugador, flechas, bosses
+  //  - Sección 4: Entidades: jugador, flechas, bosses y vidas
   //  - Sección 5: Lógica de movimiento entre cuadrantes + muros visibles
-  //  - Sección 6: Render (fondos por mundo, decor, jugador, flechas, muros, minimapa)
+  //  - Sección 6: Render (fondos, decor, jugador, flechas, muros, minimapa, corazones)
   //  - Sección 7: Bucle de juego (update/render) + pausa con P
   //  - Sección 8: Tests rápidos para verificar el mapeo A1–H8
   // ======================================================================
@@ -82,6 +82,7 @@
   const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
   const len   = (x,y)=> Math.hypot(x,y);
   const norm  = (x,y)=> { const L = len(x,y)||1; return {x:x/L,y:y/L}; };
+  function dist2(ax,ay,bx,by){ const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; }
   // RNG determinista/aleatorio
   function hash2i(x, y){ let h = x * 374761393 + y * 668265263; h = (h ^ (h >> 13)) * 1274126177; return (h ^ (h >> 16)) >>> 0; }
   function mulberry32(a){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; } }
@@ -93,14 +94,10 @@
   const QUAD_SIZE   = { w: 1920, h: 1080 };       // tamaño lógico de cada cuadrante
   const WORLD_BOUNDS= { minX:0,maxX:7,minY:0,maxY:7 }; // tablero de 8×8
 
-  // Definición de mundos:
-  // - id: clave interna
-  // - label: nombre visible
-  // - palette: modo de pintado del fondo
   const WORLDS = {
     violeta: { id:'violeta', label:'Violeta‑01', palette:'violet'   },
     tierra:  { id:'tierra',  label:'Tierra‑01',  palette:'earth'    },
-    creativo:{ id:'creativo',label:'Creativo‑01',palette:'creative' } // NUEVO
+    neon:    { id:'neon',    label:'Neón Nexus', palette:'neon'     }
   };
 
   // Estado global del juego
@@ -109,7 +106,8 @@
     qx: 0, qy: 7,               // cuadrante actual (A1)
     paused: false,              // pausa (toggle con P)
     arrows: [],                 // flechas activas
-    lastTime: performance.now() // tiempo del frame anterior
+    lastTime: performance.now(),
+    gameOver:false
   };
 
   // Conversión de índice (qx,qy) a notación tipo ajedrez (A1..H8)
@@ -129,22 +127,19 @@
   const bossEl  = document.getElementById('boss');
   const worldVBtn = document.getElementById('worldV');
   const worldEBtn = document.getElementById('worldE');
-  const worldCBtn = document.getElementById('worldC');
+  const worldNBtn = document.getElementById('worldN');
 
   const keys = new Set();
   const mouse = { x:0, y:0, down:false };
 
-  // FIX: evitar que mantener presionada "P" haga toggle repetido
   window.addEventListener('keydown', (e)=>{
     const k = e.key.toLowerCase();
     keys.add(k);
-    // Pausa/reanudar SIEMPRE funciona (incluso estando en pausa)
+    // Pausa/reanudar con protección de repetición
     if(k === 'p' && !e.repeat) state.paused = !state.paused;
-    // Selección rápida de mundos
     if(k === '1') selectWorld('violeta');
     if(k === '2') selectWorld('tierra');
-    if(k === '3') selectWorld('creativo');
-    // NOTA: Se elimina la tecla R (centrar) por pedido.
+    if(k === '3') selectWorld('neon');
   });
   window.addEventListener('keyup',   (e)=>{ keys.delete(e.key.toLowerCase()); });
   canvas.addEventListener('pointermove', (e)=>{
@@ -154,12 +149,12 @@
   });
   canvas.addEventListener('pointerdown', ()=>{ mouse.down = true; });
   canvas.addEventListener('pointerup',   ()=>{ mouse.down = false; });
-  canvas.addEventListener('pointerleave',()=>{ mouse.down = false; }); // FIX: evita "click pegado"
+  canvas.addEventListener('pointerleave',()=>{ mouse.down = false; });
   canvas.addEventListener('contextmenu', (e)=> e.preventDefault());
 
   worldVBtn.addEventListener('click', ()=> selectWorld('violeta'));
   worldEBtn.addEventListener('click', ()=> selectWorld('tierra'));
-  worldCBtn.addEventListener('click', ()=> selectWorld('creativo'));
+  worldNBtn.addEventListener('click', ()=> selectWorld('neon'));
 
   function updateBadges(){
     worldEl.textContent = `Mundo: ${WORLDS[state.world].label}`;
@@ -168,23 +163,31 @@
     bossEl.textContent  = `Boss: ${b.alive ? quadName(b.qx,b.qy) : 'Derrotado'}`;
     worldVBtn.classList.toggle('active', state.world==='violeta');
     worldEBtn.classList.toggle('active', state.world==='tierra');
-    worldCBtn.classList.toggle('active', state.world==='creativo');
+    worldNBtn.classList.toggle('active', state.world==='neon');
   }
 
   // ————————————————————————————————————————————————————————————
-  // Sección 4 — Entidades: jugador, flechas, bosses (uno por mundo)
+  // Sección 4 — Entidades: jugador, flechas, bosses y vidas
   // ————————————————————————————————————————————————————————————
   const player = {
-    pos: { x: QUAD_SIZE.w/2, y: QUAD_SIZE.h/2 }, // posición dentro del cuadrante
-    speed: 360,    // velocidad en px/s
-    radius: 14,    // tamaño visual
+    pos: { x: QUAD_SIZE.w/2, y: QUAD_SIZE.h/2 },
+    speed: 360,
+    radius: 14,
     fireCooldown: 0,
-    fireRate: 0.18 // segundos entre disparos
+    fireRate: 0.18,
+    hpMax: 3,
+    hp: 3,
+    inv: 0 // invulnerabilidad (i-frames) tras golpe
   };
+
+  function resetPlayer(){
+    player.hp = player.hpMax; player.inv = 0; state.gameOver=false;
+    player.pos.x = QUAD_SIZE.w/2; player.pos.y = QUAD_SIZE.h/2;
+  }
 
   // Disparo simple en dirección del cursor
   function shoot(){
-    if(player.fireCooldown > 0) return;
+    if(player.fireCooldown > 0 || state.gameOver) return;
     const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
     const v = { x: mouse.x - p.x, y: mouse.y - p.y };
     const d = norm(v.x, v.y);
@@ -196,26 +199,23 @@
   // Bosses (un objeto por mundo)
   const bosses = {};
   function spawnBossFor(worldId){
-    // El boss aparece en un cuadrante aleatorio (evita A1)
     let bx = Math.floor(RND()*8), by = Math.floor(RND()*8);
-    if(bx === 0 && by === 7) bx = (bx+1)%8;
+    if(bx === 0 && by === 7) bx = (bx+1)%8; // evita A1
     return { world: worldId, qx: bx, qy: by, alive: true, x: QUAD_SIZE.w/2, y: QUAD_SIZE.h/2, r:32, hp:100, t:0 };
   }
   bosses.violeta = spawnBossFor('violeta');
   bosses.tierra  = spawnBossFor('tierra');
-  bosses.creativo= spawnBossFor('creativo'); // NUEVO
+  bosses.neon    = spawnBossFor('neon');
 
-  // Lógica y render del boss (comparten base, varían color/velocidad por mundo)
   function updateBoss(dt){
     const b = bosses[state.world];
-    if(!b.alive) return;                   // no hacer nada si ya está muerto
-    if(state.qx !== b.qx || state.qy !== b.qy) return; // activo sólo en su cuadrante
+    if(!b.alive) return;
+    if(state.qx !== b.qx || state.qy !== b.qy) return;
     b.t += dt;
-    // Movimiento orbital simple (difiere por mundo)
     const cfg = {
       violeta: { R:120, w:1.2, k:0.6 },
       tierra:  { R:110, w:0.9, k:0.8 },
-      creativo:{ R:140, w:1.5, k:1.0 } // más rápido en creativo
+      neon:    { R:140, w:1.5, k:1.0 }
     }[state.world];
     b.x = QUAD_SIZE.w/2 + Math.cos(b.t*cfg.w)*cfg.R;
     b.y = QUAD_SIZE.h/2 + Math.sin(b.t*cfg.w)*cfg.R*cfg.k;
@@ -223,13 +223,23 @@
     // Golpe por flecha
     for(let i=state.arrows.length-1;i>=0;i--){
       const a = state.arrows[i];
-      const dx = a.x - b.x, dy = a.y - b.y;
-      if(dx*dx + dy*dy <= (b.r+6)*(b.r+6)){
+      if(dist2(a.x,a.y,b.x,b.y) <= (b.r+6)*(b.r+6)){
         b.hp -= 10; state.arrows.splice(i,1);
         if(b.hp <= 0){ b.alive = false; bossEl.textContent = 'Boss: Derrotado'; break; }
       }
     }
+
+    // Daño por contacto al jugador (con i-frames)
+    if(player.inv>0) return;
+    if(dist2(player.pos.x,player.pos.y,b.x,b.y) <= (player.radius + b.r)*(player.radius + b.r)){
+      player.hp -= 1; player.inv = 1.2; // 1.2s de invulnerabilidad
+      // Knockback suave
+      const away = norm(player.pos.x - b.x, player.pos.y - b.y);
+      player.pos.x += away.x * 28; player.pos.y += away.y * 28;
+      if(player.hp <= 0){ state.gameOver = true; }
+    }
   }
+
   function renderBoss(){
     const b = bosses[state.world];
     if(!b.alive) return;
@@ -250,21 +260,17 @@
   function selectWorld(worldId){
     if(!WORLDS[worldId]) return;
     state.world = worldId;
-    // No movemos qx,qy; sólo centramos al jugador en el cuadrante actual
     player.pos.x = QUAD_SIZE.w/2; player.pos.y = QUAD_SIZE.h/2;
     updateBadges();
   }
 
-  // Teletransporte a cuadrante aleatorio (con tecla E)
   function teleportRandomQuadrant(){
     let nx, ny; do { nx = Math.floor(RND()*8); ny = Math.floor(RND()*8); } while (nx===state.qx && ny===state.qy);
     state.qx = nx; state.qy = ny; player.pos.x = QUAD_SIZE.w/2; player.pos.y = QUAD_SIZE.h/2; updateBadges();
   }
 
-  // Intento de cambio de cuadrante por cruzar borde
   function tryMoveQuadrant(dx, dy, edge){
     const nx = state.qx + dx, ny = state.qy + dy;
-    // Limites duros: si no existe vecino, clampa y NO cruza
     if(nx < WORLD_BOUNDS.minX || nx > WORLD_BOUNDS.maxX || ny < WORLD_BOUNDS.minY || ny > WORLD_BOUNDS.maxY){
       if(edge==='left')  player.pos.x = 0;
       if(edge==='right') player.pos.x = QUAD_SIZE.w;
@@ -272,7 +278,6 @@
       if(edge==='down')  player.pos.y = QUAD_SIZE.h;
       return;
     }
-    // Sí existe vecino → cambia de cuadrante y coloca al jugador en el borde opuesto
     state.qx = nx; state.qy = ny;
     if(edge==='right') player.pos.x = 10;
     if(edge==='left')  player.pos.x = QUAD_SIZE.w-10;
@@ -281,62 +286,48 @@
     updateBadges();
   }
 
-  // — Muros visibles del borde del mundo —
-  // Dibuja dentro del cuadrante actual segmentos gruesos en los lados que
-  // NO tienen vecino (o sea, el borde exterior del 8×8).
   function drawWorldWalls(){
-    const wallW = 10; // grosor del muro (en px lógicos del cuadrante)
+    const wallW = 10;
     ctx.save();
-    // Patrón visual de muro
     const grad = ctx.createLinearGradient(0,0,wallW,0);
     grad.addColorStop(0,'#ff3b3b'); grad.addColorStop(1,'#ffb3b3');
     ctx.fillStyle = grad;
-
-    // Arriba (no hay vecino arriba si qy===minY)
     if(state.qy === WORLD_BOUNDS.minY){ ctx.fillRect(0, 0, QUAD_SIZE.w, wallW); }
-    // Abajo
     if(state.qy === WORLD_BOUNDS.maxY){ ctx.fillRect(0, QUAD_SIZE.h-wallW, QUAD_SIZE.w, wallW); }
-    // Izquierda
     if(state.qx === WORLD_BOUNDS.minX){ ctx.fillRect(0, 0, wallW, QUAD_SIZE.h); }
-    // Derecha
     if(state.qx === WORLD_BOUNDS.maxX){ ctx.fillRect(QUAD_SIZE.w-wallW, 0, wallW, QUAD_SIZE.h); }
 
-    // Señalización (triángulos) indicando lados transitables (si hay vecino)
     ctx.fillStyle = 'rgba(230,238,248,0.25)';
     const arrow = (x,y,ax,ay)=>{ ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-ax*14,y-ay*14); ctx.lineTo(x+ay*14,y-ax*14); ctx.closePath(); ctx.fill(); };
-    if(state.qy > WORLD_BOUNDS.minY) arrow(QUAD_SIZE.w/2, 8, 0,-1); // arriba hay vecino
-    if(state.qy < WORLD_BOUNDS.maxY) arrow(QUAD_SIZE.w/2, QUAD_SIZE.h-8, 0,1); // abajo
-    if(state.qx > WORLD_BOUNDS.minX) arrow(8, QUAD_SIZE.h/2, -1,0); // izquierda
-    if(state.qx < WORLD_BOUNDS.maxX) arrow(QUAD_SIZE.w-8, QUAD_SIZE.h/2, 1,0); // derecha
-
+    if(state.qy > WORLD_BOUNDS.minY) arrow(QUAD_SIZE.w/2, 8, 0,-1);
+    if(state.qy < WORLD_BOUNDS.maxY) arrow(QUAD_SIZE.w/2, QUAD_SIZE.h-8, 0,1);
+    if(state.qx > WORLD_BOUNDS.minX) arrow(8, QUAD_SIZE.h/2, -1,0);
+    if(state.qx < WORLD_BOUNDS.maxX) arrow(QUAD_SIZE.w-8, QUAD_SIZE.h/2, 1,0);
     ctx.restore();
   }
 
   // ————————————————————————————————————————————————————————————
-  // Sección 6 — Render: fondos por mundo, decor, jugador, flechas, muros, minimapa
+  // Sección 6 — Render
   // ————————————————————————————————————————————————————————————
-  // Conversión de coordenadas mundo→pantalla (para apuntar)
   const sx = ()=> canvas.width/QUAD_SIZE.w;  const sy = ()=> canvas.height/QUAD_SIZE.h;
   function worldToScreen(wx, wy){
-    const ox = state.qx*QUAD_SIZE.w, oy = state.qy*QUAD_SIZE.h; // origen del cuadrante
+    const ox = state.qx*QUAD_SIZE.w, oy = state.qy*QUAD_SIZE.h;
     return { x:(wx-ox)*sx(), y:(wy-oy)*sy() };
   }
 
-  // Decor cacheado por (mundo,qx,qy)
   const decorCache = new Map();
   const decorKey = (worldId,qx,qy)=> `${worldId}:${qx},${qy}`;
   function genDecorFor(worldId, qx, qy){
-    const offs = worldId==='tierra'? 999 : worldId==='creativo'? 2025 : 0; // cambia semilla por mundo
+    const offs = worldId==='tierra'? 999 : worldId==='neon'? 2025 : 0;
     const rnd = mulberry32(hash2i(qx+offs, qy+offs));
     const rocks=[], plants=[];
     const countR = 8 + Math.floor(rnd()*10);
     const countP = 12 + Math.floor(rnd()*12);
     for(let i=0;i<countR;i++) rocks.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 10 + rnd()*26 });
     for(let i=0;i<countP;i++) plants.push({ x: rnd()*QUAD_SIZE.w, y: rnd()*QUAD_SIZE.h, r: 6 + rnd()*14 });
-    // tint: factor para variar leve el fondo
     const tint = worldId==='violeta' ? (0.82 + rnd()*0.16)
                : worldId==='tierra'  ? (0.90 + rnd()*0.10)
-               : (0.95 + rnd()*0.05); // creativo, más claro
+               : (0.95 + rnd()*0.05);
     return { worldId, rocks, plants, tint };
   }
   function getDecor(worldId,qx,qy){
@@ -345,14 +336,12 @@
     return decorCache.get(k);
   }
 
-  // Dibujo del minimapa (A..H por columnas y 8..1 por filas)
   function drawMinimap(){
     const pad = 12 * DPR, cell = 14 * DPR, cols=8, rows=8, w=cols*cell, h=rows*cell;
     const x0 = canvas.width - pad - w, y0 = pad + 12*DPR;
     const b = bosses[state.world];
 
     ctx.save();
-    // Marco
     ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(x0-6*DPR, y0-18*DPR, w+12*DPR, h+30*DPR);
     ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=2*DPR; ctx.strokeRect(x0-6*DPR, y0-18*DPR, w+12*DPR, h+30*DPR);
 
@@ -360,27 +349,44 @@
       for(let gx=0; gx<cols; gx++){
         const light = ((gx+gy)%2)===0; ctx.fillStyle = light?'rgba(230,238,248,0.18)':'rgba(230,238,248,0.08)';
         const cx = x0 + gx*cell, cy = y0 + gy*cell; ctx.fillRect(cx,cy,cell,cell);
-        // boss
         if(b.alive && gx===b.qx && gy===b.qy){
           ctx.fillStyle = state.world==='violeta' ? 'rgba(255,80,80,0.9)'
                        : state.world==='tierra'  ? 'rgba(255,180,60,0.95)'
                        : 'rgba(170,120,255,0.95)';
           ctx.beginPath(); ctx.arc(cx+cell/2, cy+cell/2, 3.5*DPR, 0, Math.PI*2); ctx.fill();
         }
-        // jugador
         if(gx===state.qx && gy===state.qy){ ctx.strokeStyle='rgba(177,198,255,0.9)'; ctx.lineWidth=2*DPR; ctx.strokeRect(cx+2*DPR, cy+2*DPR, cell-4*DPR, cell-4*DPR); }
       }
     }
-    // Etiquetas A..H y 8..1
     ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`;
     ctx.textAlign='center'; for(let gx=0; gx<cols; gx++){ const cx=x0+gx*cell+cell/2; ctx.fillText(String.fromCharCode(65+gx), cx, y0-6*DPR); }
     ctx.textAlign='right';  for(let gy=0; gy<rows; gy++){ const cy=y0+gy*cell+cell/2+4*DPR; ctx.fillText(String(8-gy), x0-6*DPR, cy); }
-    // Nombre de casilla
     ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(11*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='right'; ctx.fillText(quadName(), x0+w+4*DPR, y0+h+18*DPR);
     ctx.restore();
+
+    // Corazones (vidas) — arriba, junto al minimapa
+    drawHearts(x0 - 8*DPR, y0 - 10*DPR);
   }
 
-  // Render de todo el frame
+  function drawHearts(xRight, yTop){
+    const n = player.hpMax; const size = 12*DPR; const gap = 6*DPR;
+    for(let i=0;i<n;i++){
+      const filled = i < player.hp;
+      const x = xRight - (n-i-1)*(size+gap);
+      heartIcon(x, yTop - 10*DPR, size, filled ? '#ff5d73' : 'rgba(255,255,255,0.25)');
+    }
+  }
+  function heartIcon(x,y,s,color){
+    const w=s, h=s; ctx.save(); ctx.translate(x,y);
+    ctx.fillStyle=color; ctx.beginPath();
+    ctx.moveTo(0, h*0.3);
+    ctx.bezierCurveTo(0,0, w*0.5,0, w*0.5,h*0.35);
+    ctx.bezierCurveTo(w*0.5,0, w,0, w,h*0.3);
+    ctx.bezierCurveTo(w,h*0.7, w*0.5,h, w*0.5,h);
+    ctx.bezierCurveTo(w*0.5,h, 0,h*0.7, 0,h*0.3);
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
   function render(paused=false){
     const decor = getDecor(state.world, state.qx, state.qy);
     const tint  = decor.tint;
@@ -394,10 +400,10 @@
       ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
     } else if(state.world==='tierra'){
       const g = ctx.createLinearGradient(0,0,0,canvas.height);
-      g.addColorStop(0, `rgba(135, 200, ${Math.floor(130*tint)}, 1)`); // cielo
-      g.addColorStop(1, `rgba(40, 110, 45, 1)`);                       // suelo
+      g.addColorStop(0, `rgba(135, 200, ${Math.floor(130*tint)}, 1)`);
+      g.addColorStop(1, `rgba(40, 110, 45, 1)`);
       ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
-    } else { // creativo — rejilla neón
+    } else { // Neón Nexus
       ctx.fillStyle = '#111325'; ctx.fillRect(0,0,canvas.width,canvas.height);
       ctx.save(); ctx.globalAlpha=0.25; ctx.strokeStyle='#8a5cff';
       for(let x=0;x<canvas.width;x+=32*DPR){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
@@ -408,7 +414,7 @@
     // Escala lógica del cuadrante → pantalla
     ctx.save(); ctx.scale(sx(), sy());
 
-    // Decor semiabstracto por mundo
+    // Decor
     if(state.world==='violeta'){
       ctx.globalAlpha=0.7; ctx.fillStyle='rgba(255,255,255,0.08)';
       for(const r of decor.rocks){ ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.fill(); }
@@ -419,7 +425,7 @@
       for(const r of decor.rocks){ ctx.beginPath(); ctx.rect(r.x-r.r*0.6, r.y-r.r*0.3, r.r*1.2, r.r*0.6); ctx.fill(); }
       ctx.globalAlpha=0.6; ctx.fillStyle='rgba(50,200,80,0.15)';
       for(const p of decor.plants){ ctx.beginPath(); ctx.arc(p.x,p.y,p.r*0.9,0,Math.PI*2); ctx.fill(); }
-    } else { // creativo
+    } else {
       ctx.globalAlpha=0.7; ctx.fillStyle='rgba(138,92,255,0.10)';
       for(const r of decor.rocks){ ctx.beginPath(); ctx.arc(r.x,r.y,r.r*0.9,0,Math.PI*2); ctx.fill(); }
       ctx.globalAlpha=0.5; ctx.fillStyle='rgba(0,255,255,0.12)';
@@ -437,38 +443,48 @@
       ctx.fillStyle='#e6eef8'; ctx.fill();
     }
 
-    // Jugador (astronauta minimal)
-    ctx.fillStyle = paused ? '#8aa8ff' : '#ffffff';
+    // Jugador (astronauta minimal) — parpadeo si invulnerable
+    ctx.fillStyle = (player.inv>0) ? 'rgba(255,255,255,0.55)' : (paused ? '#8aa8ff' : '#ffffff');
     ctx.beginPath(); ctx.arc(player.pos.x, player.pos.y, player.radius, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#0b1020'; ctx.beginPath(); ctx.arc(player.pos.x, player.pos.y-3, player.radius*0.55, 0, Math.PI*2); ctx.fill();
 
-    // Arco (indica dirección de mira)
+    // Arco (dirección de mira)
     const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
     const aim = norm(mouse.x - p.x, mouse.y - p.y); const bowR = player.radius + 6;
     ctx.strokeStyle='#b1c6ff'; ctx.lineWidth=2.5; ctx.beginPath();
     ctx.arc(player.pos.x, player.pos.y, bowR, Math.atan2(aim.y,aim.x)-0.9, Math.atan2(aim.y,aim.x)+0.9); ctx.stroke();
 
-    // Boss (si está en este cuadrante)
+    // Boss
     renderBoss();
 
-    // Marco sutil del cuadrante + MUROS visibles del borde del mundo
-    ctx.setLineDash([8,6]); ctx.strokeStyle='rgba(230,238,248,0.22)'; ctx.lineWidth=2; ctx.strokeRect(4,4,QUAD_SIZE.w-8,QUAD_SIZE.h-8);
-    ctx.setLineDash([]); // muros en lados exteriores
+    // Marco del cuadrante con color por mundo
+    const worldBorder = state.world==='violeta' ? 'rgba(220,160,255,0.65)'
+                       : state.world==='tierra'  ? 'rgba(120,200,120,0.65)'
+                       : 'rgba(170,120,255,0.70)';
+    ctx.setLineDash([8,6]); ctx.strokeStyle=worldBorder; ctx.lineWidth=2; ctx.strokeRect(4,4,QUAD_SIZE.w-8,QUAD_SIZE.h-8);
+    ctx.setLineDash([]);
+
+    // Muros exteriores
     drawWorldWalls();
 
     ctx.restore();
 
-    // Minimap (arriba-derecha)
+    // Minimap + corazones
     drawMinimap();
 
-    // Overlay de pausa / victoria
+    // Overlays
     if(paused){
       ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,canvas.width,canvas.height);
       ctx.fillStyle='#e6eef8'; ctx.font=`${Math.floor(24*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center';
       ctx.fillText('Pausado', canvas.width/2, canvas.height/2);
     }
+    if(state.gameOver){
+      ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle='#ff9191'; ctx.font=`${Math.floor(26*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center';
+      ctx.fillText('¡Sin vidas! Recargá la página o cambiá de mundo para reiniciar', canvas.width/2, canvas.height/2);
+    }
     const b = bosses[state.world];
-    if(!b.alive){
+    if(!b.alive && !state.gameOver){
       ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(0,0,canvas.width,40*DPR);
       ctx.fillStyle='#b4f0b4'; ctx.font=`${Math.floor(16*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center';
       ctx.fillText('¡MVP derrotado! Cambiá de mundo o recargá para un nuevo spawn', canvas.width/2, 26*DPR);
@@ -481,11 +497,10 @@
   let fpsSmoothed = 60;
   function step(){
     const now = performance.now();
-    const dt  = Math.min(0.033, (now - state.lastTime) / 1000); // máx ~30 FPS dt
+    const dt  = Math.min(0.033, (now - state.lastTime) / 1000);
     state.lastTime = now;
 
-    // Actualizar SOLO si no está pausado; render SIEMPRE (para ver overlay)
-    if(!state.paused) update(dt);
+    if(!state.paused){ update(dt); }
     render(state.paused);
 
     const fps = 1/dt; fpsSmoothed = fpsSmoothed*0.9 + fps*0.1; fpsEl.textContent = 'FPS: ' + fpsSmoothed.toFixed(0);
@@ -493,9 +508,10 @@
   }
 
   function update(dt){
-    // Entrada por frame
+    if(state.gameOver) return;
     if(keys.has('e')){ keys.delete('e'); teleportRandomQuadrant(); }
-    // Movimiento del jugador
+
+    // Movimiento
     let ax=0, ay=0;
     if(keys.has('w')||keys.has('arrowup')) ay -= 1;
     if(keys.has('s')||keys.has('arrowdown')) ay += 1;
@@ -505,7 +521,7 @@
     player.pos.x += d.x * player.speed * dt;
     player.pos.y += d.y * player.speed * dt;
 
-    // Salida por bordes → cambiar de cuadrante si existe; si no, clamp duro (muro)
+    // Bordes / cambio de cuadrante
     if(player.pos.x < 0){ if(state.qx===WORLD_BOUNDS.minX){ player.pos.x=0; } else { tryMoveQuadrant(-1,0,'left'); } }
     if(player.pos.x > QUAD_SIZE.w){ if(state.qx===WORLD_BOUNDS.maxX){ player.pos.x=QUAD_SIZE.w; } else { tryMoveQuadrant(1,0,'right'); } }
     if(player.pos.y < 0){ if(state.qy===WORLD_BOUNDS.minY){ player.pos.y=0; } else { tryMoveQuadrant(0,-1,'up'); } }
@@ -521,8 +537,11 @@
       if(a.x<-40||a.x>QUAD_SIZE.w+40||a.y<-40||a.y>QUAD_SIZE.h+40||a.life<=0) state.arrows.splice(i,1);
     }
 
-    // Boss
+    // Boss y daño por contacto
     updateBoss(dt);
+
+    // Invulnerabilidad decreciente
+    if(player.inv>0){ player.inv -= dt; if(player.inv<0) player.inv=0; }
   }
 
   // ————————————————————————————————————————————————————————————
