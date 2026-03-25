@@ -46,7 +46,7 @@
       <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
     </div>
   </div>
-  <div class="credits">v2.1 — CD 10s en habilidades + Triple con separación x3 + tests</div>
+  <div class="credits">v2.3 — CD 10s • Triple x3 separación • disparo base 2× más rápido que v2.2 • tests actualizados</div>
   <button id="restartBtn">Reiniciar Juego</button>
 
   <script>
@@ -121,7 +121,7 @@
     }
 
     // ===================== Entities =====================
-    const player={pos:{x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2},speed:360,radius:14,fireCooldown:0,fireRateBase:0.38,fireRateMult:1,hpMax:3,hp:3,inv:0}; // flechas comunes más lentas; futuro item aumentará fireRateMult
+    const player={pos:{x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2},speed:360,radius:14,fireCooldown:0,fireRateBase:0.76,fireRateMult:1,hpMax:3,hp:3,inv:0}; // flechas comunes más lentas; futuro item aumentará fireRateMult
     const bag=new Array(8).fill(null); // 2x4 slots
 
     // Habilidades (cooldowns en segundos)
@@ -509,6 +509,26 @@
 
         // T4: HUD dibuja sin errores (invocar la función)
         try{ drawAbilityHUD(); push('T4 HUD cooldown dibuja', true);}catch(e){ push('T4 HUD cooldown dibuja', false, e.message); }
+
+        // T6: Daño se suma por flecha (3 flechas = 30 de daño)
+        {
+          const b=bosses[state.world];
+          // posicionar boss en el cuadrante y posición del jugador
+          b.qx=state.qx; b.qy=state.qy; b.x=player.pos.x; b.y=player.pos.y; b.alive=true; b.hp=100;
+          state.arrows.length=0;
+          // tres flechas apiladas en la posición del jugador (velocidad cero para colisión inmediata)
+          state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1});
+          state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1});
+          state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1});
+          updateBoss(0.016);
+          push('T6 Daño acumulado (3 flechas = 30)', b.hp===70, `hp=${b.hp}`);
+        }
+
+        // T7: Disparo base ahora deja cooldown ≈ 1.52s
+        {
+          state.arrows.length=0; player.fireCooldown=0; shoot();
+          push('T7 Cooldown base ≈ 0.76s', Math.abs(player.fireCooldown-0.76)<0.1, `cd=${player.fireCooldown.toFixed(2)}`);
+        }
 
       }catch(e){
         push('Execepción general en tests', false, e.message||String(e));
