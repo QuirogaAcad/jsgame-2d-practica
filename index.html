@@ -46,7 +46,7 @@
       <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
     </div>
   </div>
-  <div class="credits">v2.0 — CD 10s en habilidades + Triple con mayor separación + tests</div>
+  <div class="credits">v2.1 — CD 10s en habilidades + Triple con separación x3 + tests</div>
   <button id="restartBtn">Reiniciar Juego</button>
 
   <script>
@@ -191,7 +191,7 @@
       const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
       const base=Math.atan2(mouse.y-p.y, mouse.x-p.x);
       const dir={x:Math.cos(base), y:Math.sin(base)};
-      const gap=28; // mayor separación para apreciar las 3 flechas // distancia entre flechas del trencito
+      const gap=84; // separación x3 para apreciar claramente las 3 flechas
       // tres flechas alineadas en la misma trayectoria, separadas hacia atrás
       spawnArrow(base,1, -dir.x*0,  -dir.y*0);
       spawnArrow(base,1, -dir.x*gap, -dir.y*gap);
