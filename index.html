@@ -45,7 +45,7 @@
       <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
     </div>
   </div>
-  <div class="credits">v1.6 — HUD de cooldown (1/2/3), fix grilla Neón, pequeños pulidos</div>
+  <div class="credits">v1.7 — HUD movido a la izquierda + Twin visible + Triple secuencial + flechas base más lentas</div>
   <button id="restartBtn">Reiniciar Juego</button>
 
 <script>
@@ -113,7 +113,7 @@
   }
 
   // ===================== Entities =====================
-  const player={pos:{x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2},speed:360,radius:14,fireCooldown:0,fireRate:0.18,hpMax:3,hp:3,inv:0};
+  const player={pos:{x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2},speed:360,radius:14,fireCooldown:0,fireRateBase:0.38,fireRateMult:1,hpMax:3,hp:3,inv:0}; // flechas comunes más lentas; futuro item aumentará fireRateMult
   const bag=new Array(8).fill(null); // 2x4 slots
 
   // Habilidades (cooldowns en segundos)
@@ -127,14 +127,15 @@
   function resetPlayer(){player.hp=player.hpMax;player.inv=0;state.gameOver=false;state.paused=false;player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;}
   function resetGame(){Object.assign(state,{...INITIAL_STATE,lastTime:performance.now()});resetPlayer();bosses.violeta=spawnBossFor('violeta');bosses.tierra=spawnBossFor('tierra');bosses.neon=spawnBossFor('neon');state.arrows.length=0;restartBtn.style.display='none';worldSelect.value=state.world;updateBossBadge();}
 
-  function shoot(angleOverride=null,speedMul=1){
+  function shoot(angleOverride=null,speedMul=1,ox=0,oy=0){
     if(player.fireCooldown>0||state.gameOver) return false;
     const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
     let vx=mouse.x-p.x, vy=mouse.y-p.y; let ang=Math.atan2(vy,vx);
     if(angleOverride!==null) ang=angleOverride;
     const d={x:Math.cos(ang), y:Math.sin(ang)}; const speed=900*speedMul;
-    state.arrows.push({x:player.pos.x,y:player.pos.y,vx:d.x*speed,vy:d.y*speed,life:1.2});
-    player.fireCooldown=player.fireRate;
+    state.arrows.push({x:player.pos.x+ox,y:player.pos.y+oy,vx:d.x*speed,vy:d.y*speed,life:1.2});
+    // cooldown efectivo: base modificable por futuros ítems
+    player.fireCooldown = player.fireRateBase / Math.max(0.1, player.fireRateMult);
     return true;
   }
 
@@ -154,7 +155,10 @@
     if(abilities.twin.cd>0 || state.gameOver) return;
     const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
     const base=Math.atan2(mouse.y-p.y, mouse.x-p.x);
-    shoot(base-0.08); shoot(base+0.08);
+    const perp={x:-Math.sin(base), y:Math.cos(base)}; // vector perpendicular para separar orígenes
+    const offset=8; // px para que se vean claramente dos flechas
+    shoot(base-0.18,1, -perp.x*offset, -perp.y*offset);
+    shoot(base+0.18,1,  perp.x*offset,  perp.y*offset);
     abilities.twin.cd = abilities.twin.max;
   }
 
@@ -164,7 +168,7 @@
     const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
     const base=Math.atan2(mouse.y-p.y, mouse.x-p.x);
     shoot(base);
-    abilities.activeBurst = {base, remain:2, interval:0.08, t:0.08};
+    abilities.activeBurst = {base, remain:2, interval:0.16, t:0.16}; // intervalo mayor para que se vean 3 flechas seguidas
     abilities.burst.cd = abilities.burst.max;
   }
 
@@ -246,7 +250,7 @@
     const baseY = 10*DPR; // alineado con corazones
     const rightEdge = canvas.width - 220*DPR; // mismo offset de corazones
     const slot = 26*DPR; const gap = 8*DPR; // tamaño del círculo
-    const startX = rightEdge - (3*(slot+gap)) - 24*DPR; // a la izquierda de los corazones
+    const startX = rightEdge - (3*(slot+gap)) - 140*DPR; // desplazado más a la izquierda para no tapar corazones // a la izquierda de los corazones
 
     const items=[
       {label:'1', cd:abilities.dash.cd, max:abilities.dash.max, hint:'Dash'},
