@@ -46,7 +46,7 @@
       <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
     </div>
   </div>
-  <div class="credits">v2.3 — CD 10s • Triple x3 separación • disparo base 2× más rápido que v2.2 • tests actualizados</div>
+  <div class="credits">v2.4 — Fix: números (1/2/3) no cambian planeta al usar habilidades • resto igual</div>
   <button id="restartBtn">Reiniciar Juego</button>
 
   <script>
@@ -112,6 +112,13 @@
     canvas.addEventListener('contextmenu',e=>e.preventDefault());
 
     worldSelect.addEventListener('change',()=>selectWorld(worldSelect.value));
+    // Evita que 1/2/3 dentro del <select> cambien el planeta cuando se usan como habilidades
+    worldSelect.addEventListener('keydown', (e)=>{
+      if(e.key==='1' || e.key==='2' || e.key==='3'){
+        e.preventDefault(); // no cambiar opción del select
+        // No detener la propagación: dejamos que el atajo llegue a window para activar la habilidad
+      }
+    });
     bagBtn.addEventListener('click',()=>{state.showBag=!state.showBag});
     restartBtn.addEventListener('click',()=>{resetGame()});
 
