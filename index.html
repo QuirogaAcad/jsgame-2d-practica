@@ -43,10 +43,10 @@
       <div><kbd>1</kbd> dash • <kbd>2</kbd> 2 flechas paralelas • <kbd>3</kbd> "trencito" de 3 (CD 10s)</div>
       <div><kbd>E</kbd> teletransportar cuadrante aleatorio • bordes duros 8×8</div>
       <div><kbd>P</kbd> pausa / reanudar • <kbd>I</kbd> o botón para mochila</div>
-      <div>Si el <b>Boss</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
+      <div>Si el <b>Boss</b> o una <b>Criatura</b> te toca, perdés una vida. Tenés <b>3</b> ❤️.</div>
     </div>
   </div>
-  <div class="credits">v2.5 — Juice: estelas, flash dash, pop+shake; bosses con dificultad por mundo; fixes</div>
+  <div class="credits">v3.0 — Criaturas con vida + 10 Goblins agresivos (persecución) + fixes previos</div>
   <button id="restartBtn">Reiniciar Juego</button>
 
   <script>
@@ -56,12 +56,7 @@
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    function resize(){
-      canvas.width = Math.floor(window.innerWidth * DPR);
-      canvas.height = Math.floor(window.innerHeight * DPR);
-      canvas.style.width = window.innerWidth + 'px';
-      canvas.style.height = window.innerHeight + 'px';
-    }
+    function resize(){ canvas.width = Math.floor(window.innerWidth * DPR); canvas.height = Math.floor(window.innerHeight * DPR); canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; }
     window.addEventListener('resize', resize); resize();
 
     const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -75,11 +70,7 @@
     // ===================== World & state =====================
     const QUAD_SIZE={w:1920,h:1080};
     const WORLD_BOUNDS={minX:0,maxX:7,minY:0,maxY:7};
-    const WORLDS={
-      violeta:{id:'violeta',label:'1 — Violeta‑01'},
-      tierra:{id:'tierra',label:'2 — Tierra‑01'},
-      neon:{id:'neon',label:'3 — Neón Nexus'}
-    };
+    const WORLDS={ violeta:{id:'violeta',label:'1 — Violeta‑01'}, tierra:{id:'tierra',label:'2 — Tierra‑01'}, neon:{id:'neon',label:'3 — Neón Nexus'} };
     const INITIAL_STATE={world:'violeta',qx:0,qy:7,paused:false,arrows:[],lastTime:performance.now(),gameOver:false,showBag:false};
     const state={...INITIAL_STATE};
 
@@ -116,18 +107,17 @@
     canvas.addEventListener('contextmenu',e=>e.preventDefault());
 
     worldSelect.addEventListener('change',()=>selectWorld(worldSelect.value));
-    // Evita que 1/2/3 cambien la opción del select al usar habilidades
+    // Bloquear que el selector consuma 1/2/3 o numpad y cambie de planeta cuando se usan habilidades
     worldSelect.addEventListener('keydown',(e)=>{
-      if(e.key==='1'||e.key==='2'||e.key==='3'){ e.preventDefault(); }
+      const blockKeys=['1','2','3','Numpad1','Numpad2','Numpad3'];
+      if(blockKeys.includes(e.key)){ e.preventDefault(); }
     });
 
     bagBtn.addEventListener('click',()=>{state.showBag=!state.showBag});
     restartBtn.addEventListener('click',()=>{resetGame()});
 
-    function updateBossBadge(){
-      const b=bosses[state.world];
-      bossEl.textContent=`Boss: ${b.alive? (String.fromCharCode(65+clamp(b.qx,0,7)) + (8-clamp(b.qy,0,7))) : 'Derrotado'}`;
-    }
+    // ===================== Boss/UI helpers =====================
+    function updateBossBadge(){ const b=bosses[state.world]; bossEl.textContent=`Boss: ${b.alive? (String.fromCharCode(65+clamp(b.qx,0,7)) + (8-clamp(b.qy,0,7))) : 'Derrotado'}`; }
 
     // ===================== Entities =====================
     const player={pos:{x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2},speed:360,radius:14,fireCooldown:0,fireRateBase:0.76,fireRateMult:1,hpMax:3,hp:3,inv:0};
@@ -136,128 +126,195 @@
     // Habilidades (cooldowns en segundos)
     const abilities={ dash:{cd:0,max:10}, twin:{cd:0,max:10}, burst:{cd:0,max:10} };
 
-    // Boss cfg por mundo (estilo Titan Souls: HP y patrón más exigentes)
-    const BOSS_CFG={
-      violeta:{hp:80,R:100,w:1.1,k:0.6},
-      tierra:{hp:120,R:120,w:1.3,k:0.8},
-      neon:{hp:160,R:150,w:1.6,k:1.0}
-    };
+    // Boss cfg por mundo
+    const BOSS_CFG={ violeta:{hp:80,R:100,w:1.1,k:0.6}, tierra:{hp:120,R:120,w:1.3,k:0.8}, neon:{hp:160,R:150,w:1.6,k:1.0} };
 
-    function resetPlayer(){
-      player.hp=player.hpMax;player.inv=0;state.gameOver=false;state.paused=false;
-      player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2;
+    function resetPlayer(){ player.hp=player.hpMax;player.inv=0;state.gameOver=false;state.paused=false; player.pos.x=QUAD_SIZE.w/2;player.pos.y=QUAD_SIZE.h/2; }
+
+    // ===================== Bosses =====================
+    const bosses={};
+    function spawnBossFor(worldId){
+      // cuadrante aleatorio (evitar 0,7 como antes)
+      let bx=Math.floor(RND()*8),by=Math.floor(RND()*8); if(bx===0&&by===7)bx=(bx+1)%8;
+      const cfg=BOSS_CFG[worldId]||BOSS_CFG.violeta;
+      // posición aleatoria dentro del cuadrante y fase inicial aleatoria
+      const x = RND()*QUAD_SIZE.w;
+      const y = RND()*QUAD_SIZE.h;
+      const phase = RND()*10;
+      return{world:worldId,qx:bx,qy:by,alive:true,x,y,r:32,hp:cfg.hp,hpMax:cfg.hp,t:phase,hitT:0,attackT:0,chargeT:0,chargeVX:0,chargeVY:0};
     }
+    bosses.violeta=spawnBossFor('violeta');
+    bosses.tierra=spawnBossFor('tierra');
+    bosses.neon=spawnBossFor('neon');
+
     function resetGame(){
       Object.assign(state,{...INITIAL_STATE,lastTime:performance.now()});
       resetPlayer();
       bosses.violeta=spawnBossFor('violeta');
       bosses.tierra=spawnBossFor('tierra');
       bosses.neon=spawnBossFor('neon');
-      state.arrows.length=0;restartBtn.style.display='none';
-      worldSelect.value=state.world;updateBossBadge();
+      state.arrows.length=0; restartBtn.style.display='none';
+      worldSelect.value=state.world; updateBossBadge();
     }
 
-    function spawnArrow(angle, speedMul=1, ox=0, oy=0){
-      const d={x:Math.cos(angle), y:Math.sin(angle)}; const speed=900*speedMul;
-      state.arrows.push({x:player.pos.x+ox,y:player.pos.y+oy,vx:d.x*speed,vy:d.y*speed,life:1.2});
-    }
-
-    function shoot(angleOverride=null,speedMul=1,ox=0,oy=0){
-      if(player.fireCooldown>0||state.gameOver) return false;
-      const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-      let vx=mouse.x-p.x, vy=mouse.y-p.y; let ang=Math.atan2(vy,vx);
-      if(angleOverride!==null) ang=angleOverride;
-      spawnArrow(ang, speedMul, ox, oy);
-      player.fireCooldown = player.fireRateBase / Math.max(0.1, player.fireRateMult);
-      return true;
-    }
-
-    // ===================== Bosses =====================
-    const bosses={};
-    function spawnBossFor(worldId){
-      let bx=Math.floor(RND()*8),by=Math.floor(RND()*8); if(bx===0&&by===7)bx=(bx+1)%8;
-      const cfg=BOSS_CFG[worldId]||BOSS_CFG.violeta;
-      return{world:worldId,qx:bx,qy:by,alive:true,x:QUAD_SIZE.w/2,y:QUAD_SIZE.h/2,r:32,hp:cfg.hp,hpMax:cfg.hp,t:0,hitT:0};
-    }
-    bosses.violeta=spawnBossFor('violeta');
-    bosses.tierra=spawnBossFor('tierra');
-    bosses.neon=spawnBossFor('neon');
+    function spawnArrow(angle, speedMul=1, ox=0, oy=0){ const d={x:Math.cos(angle), y:Math.sin(angle)}; const speed=900*speedMul; state.arrows.push({x:player.pos.x+ox,y:player.pos.y+oy,vx:d.x*speed,vy:d.y*speed,life:1.2}); }
+    function shoot(angleOverride=null,speedMul=1,ox=0,oy=0){ if(player.fireCooldown>0||state.gameOver) return false; const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h); let vx=mouse.x-p.x, vy=mouse.y-p.y; let ang=Math.atan2(vy,vx); if(angleOverride!==null) ang=angleOverride; spawnArrow(ang, speedMul, ox, oy); player.fireCooldown = player.fireRateBase / Math.max(0.1, player.fireRateMult); return true; }
 
     function updateBoss(dt){
-      const b=bosses[state.world]; if(!b.alive) return; if(state.qx!==b.qx||state.qy!==b.qy) return; b.t+=dt; if(b.hitT>0){ b.hitT-=dt; if(b.hitT<0) b.hitT=0; }
-      const cfg=BOSS_CFG[state.world];
-      b.x=QUAD_SIZE.w/2+Math.cos(b.t*cfg.w)*cfg.R;
-      b.y=QUAD_SIZE.h/2+Math.sin(b.t*cfg.w)*cfg.R*cfg.k;
-      for(let i=state.arrows.length-1;i>=0;i--){ const a=state.arrows[i];
-        if(dist2(a.x,a.y,b.x,b.y)<= (b.r+6)*(b.r+6)){
-          b.hp-=10; b.hitT=0.12; addShake(3,0.12);
-          state.arrows.splice(i,1);
-          if(b.hp<=0){ b.alive=false; updateBossBadge(); break; }
+      const b=bosses[state.world]; if(!b.alive) return; if(state.qx!==b.qx||state.qy!==b.qy) return;
+      const cx=QUAD_SIZE.w/2, cy=QUAD_SIZE.h/2; const cfg=BOSS_CFG[state.world];
+      b.t+=dt; if(b.hitT>0){ b.hitT-=dt; if(b.hitT<0) b.hitT=0; }
+      b.attackT += dt;
+      if(state.world==='violeta'){
+        b.x = cx + Math.cos(b.t*cfg.w)*cfg.R; b.y = cy + Math.sin(b.t*cfg.w)*cfg.R*cfg.k;
+      } else if(state.world==='tierra'){
+        const R=cfg.R, w=cfg.w; b.x = cx + Math.cos(b.t*w)*R; b.y = cy + Math.sin(b.t*w*2)*R*cfg.k;
+      } else {
+        if(b.chargeT>0){ b.x += b.chargeVX*dt; b.y += b.chargeVY*dt; b.chargeT -= dt; }
+        else {
+          const R = cfg.R*(1+0.25*Math.sin(b.t*0.7)); const baseX = cx + Math.cos(b.t*cfg.w)*R; const baseY = cy + Math.sin(b.t*cfg.w*1.2)*R*cfg.k; b.x = b.x*0.85 + baseX*0.15; b.y = b.y*0.85 + baseY*0.15; if(b.attackT>2.8){ b.attackT=0; const dx = player.pos.x - b.x, dy = player.pos.y - b.y; const L=Math.hypot(dx,dy)||1; const sp=700; b.chargeVX = dx/L*sp; b.chargeVY = dy/L*sp; b.chargeT=0.35; }
         }
       }
-      if(player.inv<=0&&dist2(player.pos.x,player.pos.y,b.x,b.y)<= (player.radius+b.r)*(player.radius+b.r)){
-        player.hp-=1; player.inv=1.2; const away=norm(player.pos.x-b.x,player.pos.y-b.y); player.pos.x+=away.x*28; player.pos.y+=away.y*28; addShake(4,0.18);
-        if(player.hp<=0){ state.gameOver=true; restartBtn.style.display='block'; }
+      for(let i=state.arrows.length-1;i>=0;i--){ const a=state.arrows[i]; if(dist2(a.x,a.y,b.x,b.y)<= (b.r+6)*(b.r+6)){ b.hp-=10; b.hitT=0.12; addShake(3,0.12); state.arrows.splice(i,1); if(b.hp<=0){ b.alive=false; updateBossBadge(); break; } } }
+      if(player.inv<=0&&dist2(player.pos.x,player.pos.y,b.x,b.y)<= (player.radius+b.r)*(player.radius+b.r)){ player.hp-=1; player.inv=1.2; const away=norm(player.pos.x-b.x,player.pos.y-b.y); player.pos.x+=away.x*28; player.pos.y+=away.y*28; addShake(4,0.18); if(player.hp<=0){ state.gameOver=true; restartBtn.style.display='block'; } }
+    }
+
+    function renderBoss(){ const b=bosses[state.world]; if(!b.alive) return; if(state.qx!==b.qx||state.qy!==b.qy) return; const color=state.world==='violeta'?'#ff6565':state.world==='tierra'?'#ffd166':'#8a5cff'; const bar=state.world==='violeta'?'#ff9090':state.world==='tierra'?'#ffe09a':'#c3a3ff'; const scale = 1 + (b.hitT>0 ? 0.15*(b.hitT/0.12) : 0); ctx.save(); ctx.translate(b.x,b.y); ctx.scale(scale,scale); ctx.fillStyle=color; ctx.beginPath(); ctx.arc(0,0,b.r,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#0b1020'; ctx.beginPath(); ctx.arc(0,-6,b.r*0.35,0,Math.PI*2); ctx.fill(); ctx.restore(); if(state.world==='neon' && b.chargeT>0){ const a=Math.min(1,b.chargeT/0.35); ctx.strokeStyle=`rgba(195,163,255,${(0.3+0.5*a).toFixed(2)})`; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(b.x,b.y,b.r+8,0,Math.PI*2); ctx.stroke(); } const W=240,H=12,X=(QUAD_SIZE.w-W)/2,Y=28; ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(X,Y,W,H); ctx.fillStyle=bar; ctx.fillRect(X,Y,W*(b.hp/b.hpMax),H); ctx.strokeStyle='rgba(255,255,255,0.4)'; ctx.strokeRect(X,Y,W,H); }
+
+    // ===================== Criaturas comunes (15 por TABLERO, por mundo) =====================
+    const creaturesByWorld = { violeta:null, tierra:null, neon:null };
+    function genCreaturesForWorld(worldId){
+      const seed = worldId==='tierra'?1000:worldId==='neon'?2000:0;
+      const rnd = mulberry32(hash2i(42+seed, 137+seed)); // fijo por mundo/partida
+      const arr=[]; const N=15;
+      for(let i=0;i<N;i++){
+        const wx = rnd()*QUAD_SIZE.w*8; // coordenadas de mundo (0..8W)
+        const wy = rnd()*QUAD_SIZE.h*8; // (0..8H)
+        arr.push({wx, wy, r:14, type:worldId, hp:20, alive:true}); // tamaño = jugador, ahora con vida
+      }
+      return arr;
+    }
+    function getWorldCreatures(worldId){ if(!creaturesByWorld[worldId]) creaturesByWorld[worldId]=genCreaturesForWorld(worldId); return creaturesByWorld[worldId]; }
+
+    function updateCreatures(dt){
+      const list=getWorldCreatures(state.world);
+      const ox = state.qx*QUAD_SIZE.w, oy = state.qy*QUAD_SIZE.h;
+      for(let idx=0; idx<list.length; idx++){
+        const c = list[idx];
+        if(!c.alive) continue;
+        // Solo si está en el cuadrante actual
+        if(c.wx<ox||c.wx>=ox+QUAD_SIZE.w||c.wy<oy||c.wy>=oy+QUAD_SIZE.h) continue;
+        const lx=c.wx-ox, ly=c.wy-oy;
+        // Daño al jugador por contacto
+        if(player.inv<=0 && dist2(player.pos.x,player.pos.y,lx,ly) <= (player.radius+c.r)*(player.radius+c.r)){
+          player.hp-=1; player.inv=1.0; addShake(3,0.12);
+          if(player.hp<=0){ state.gameOver=true; restartBtn.style.display='block'; }
+        }
+        // Recibir daño de flechas
+        for(let i=state.arrows.length-1;i>=0;i--){
+          const a=state.arrows[i];
+          if(dist2(a.x,a.y,lx,ly) <= (c.r+6)*(c.r+6)){
+            c.hp -= 10; // mismo daño base que al boss
+            state.arrows.splice(i,1);
+            addShake(2,0.08);
+            if(c.hp<=0){ c.alive=false; break; }
+          }
+        }
       }
     }
 
-    function renderBoss(){
-      const b=bosses[state.world]; if(!b.alive) return; if(state.qx!==b.qx||state.qy!==b.qy) return;
-      const color=state.world==='violeta'?'#ff6565':state.world==='tierra'?'#ffd166':'#8a5cff';
-      const bar=state.world==='violeta'?'#ff9090':state.world==='tierra'?'#ffe09a':'#c3a3ff';
-      const scale = 1 + (b.hitT>0 ? 0.15*(b.hitT/0.12) : 0);
-      ctx.save(); ctx.translate(b.x,b.y); ctx.scale(scale,scale);
-      ctx.fillStyle=color; ctx.beginPath(); ctx.arc(0,0,b.r,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#0b1020'; ctx.beginPath(); ctx.arc(0,-6,b.r*0.35,0,Math.PI*2); ctx.fill();
-      ctx.restore();
-      const W=240,H=12,X=(QUAD_SIZE.w-W)/2,Y=28; ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(X,Y,W,H); ctx.fillStyle=bar; ctx.fillRect(X,Y,W*(b.hp/b.hpMax),H); ctx.strokeStyle='rgba(255,255,255,0.4)'; ctx.strokeRect(X,Y,W,H);
+    function renderCreatures(){
+      const list=getWorldCreatures(state.world);
+      const ox = state.qx*QUAD_SIZE.w, oy = state.qy*QUAD_SIZE.h;
+      for(const c of list){
+        if(!c.alive) continue;
+        if(c.wx<ox||c.wx>=ox+QUAD_SIZE.w||c.wy<oy||c.wy>=oy+QUAD_SIZE.h) continue;
+        const lx=c.wx-ox, ly=c.wy-oy;
+        if(c.type==='violeta'){ ctx.fillStyle='rgba(0,255,200,0.9)'; }
+        else if(c.type==='tierra'){ ctx.fillStyle='rgba(120,200,100,0.95)'; }
+        else { ctx.fillStyle='rgba(170,120,255,0.95)'; }
+        ctx.beginPath(); ctx.arc(lx,ly,c.r,0,Math.PI*2); ctx.fill();
+      }
+    }
+
+    // ===================== Goblins agresivos (10 por TABLERO, por mundo) =====================
+    const goblinsByWorld = { violeta:null, tierra:null, neon:null };
+    function genGoblinsForWorld(worldId){
+      const seed = worldId==='tierra'?3100:worldId==='neon'?4200:2100;
+      const rnd = mulberry32(hash2i(99+seed, 77+seed));
+      const arr=[]; const N=10;
+      for(let i=0;i<N;i++){
+        const wx = rnd()*QUAD_SIZE.w*8;
+        const wy = rnd()*QUAD_SIZE.h*8;
+        arr.push({wx, wy, r:16, type:'goblin', hp:40, alive:true, vx:0, vy:0});
+      }
+      return arr;
+    }
+    function getWorldGoblins(worldId){ if(!goblinsByWorld[worldId]) goblinsByWorld[worldId]=genGoblinsForWorld(worldId); return goblinsByWorld[worldId]; }
+
+    function updateGoblins(dt){
+      const list=getWorldGoblins(state.world);
+      const ox = state.qx*QUAD_SIZE.w, oy = state.qy*QUAD_SIZE.h;
+      const vision = 380; // rango de visión en px locales
+      const speed = 140;  // velocidad de persecución
+      for(const g of list){
+        if(!g.alive) continue;
+        if(g.wx<ox||g.wx>=ox+QUAD_SIZE.w||g.wy<oy||g.wy>=oy+QUAD_SIZE.h) continue; // fuera del cuadrante
+        // Posiciones locales
+        let lx=g.wx-ox, ly=g.wy-oy;
+        // Ver jugador
+        const d2 = dist2(lx,ly, player.pos.x, player.pos.y);
+        if(d2 <= vision*vision){
+          const d = norm(player.pos.x - lx, player.pos.y - ly);
+          g.vx = d.x*speed; g.vy = d.y*speed;
+          lx += g.vx*dt; ly += g.vy*dt;
+        }
+        // Escribir de vuelta a coords de mundo
+        g.wx = ox + lx; g.wy = oy + ly;
+
+        // Contacto con jugador
+        if(player.inv<=0 && dist2(player.pos.x,player.pos.y,lx,ly) <= (player.radius+g.r)*(player.radius+g.r)){
+          player.hp -= 1; player.inv = 1.2; addShake(4,0.15);
+          // pequeño retroceso para el jugador
+          const away = norm(player.pos.x-lx, player.pos.y-ly);
+          player.pos.x += away.x*22; player.pos.y += away.y*22;
+          if(player.hp<=0){ state.gameOver=true; restartBtn.style.display='block'; }
+        }
+        // Daño por flechas
+        for(let i=state.arrows.length-1;i>=0;i--){
+          const a=state.arrows[i];
+          if(dist2(a.x,a.y,lx,ly) <= (g.r+6)*(g.r+6)){
+            g.hp -= 10; state.arrows.splice(i,1); addShake(3,0.12);
+            if(g.hp<=0){ g.alive=false; break; }
+          }
+        }
+      }
+    }
+
+    function renderGoblins(){
+      const list=getWorldGoblins(state.world);
+      const ox = state.qx*QUAD_SIZE.w, oy = state.qy*QUAD_SIZE.h;
+      for(const g of list){
+        if(!g.alive) continue;
+        if(g.wx<ox||g.wx>=ox+QUAD_SIZE.w||g.wy<oy||g.wy>=oy+QUAD_SIZE.h) continue;
+        const lx=g.wx-ox, ly=g.wy-oy;
+        // Cuerpo
+        ctx.fillStyle='rgba(200,255,120,0.95)';
+        ctx.beginPath(); ctx.arc(lx,ly,g.r,0,Math.PI*2); ctx.fill();
+        // Carita / indicador agresivo
+        ctx.fillStyle='#0b1020';
+        ctx.beginPath(); ctx.arc(lx,ly-3,g.r*0.35,0,Math.PI*2); ctx.fill();
+      }
     }
 
     // ===================== Movimiento & habilidades =====================
     function selectWorld(worldId){ if(!WORLDS[worldId])return; state.world=worldId; player.pos.x=QUAD_SIZE.w/2; player.pos.y=QUAD_SIZE.h/2; worldSelect.value=worldId; updateBossBadge(); }
     function teleportRandomQuadrant(){ let nx,ny; do{ nx=Math.floor(RND()*8); ny=Math.floor(RND()*8); }while(nx===state.qx&&ny===state.qy); state.qx=nx; state.qy=ny; player.pos.x=QUAD_SIZE.w/2; player.pos.y=QUAD_SIZE.h/2; }
-    function tryMoveQuadrant(dx,dy,edge){
-      const nx=state.qx+dx, ny=state.qy+dy;
-      if(nx<WORLD_BOUNDS.minX||nx>WORLD_BOUNDS.maxX||ny<WORLD_BOUNDS.minY||ny>WORLD_BOUNDS.maxY){
-        if(edge==='left')player.pos.x=0; if(edge==='right')player.pos.x=QUAD_SIZE.w; if(edge==='up')player.pos.y=0; if(edge==='down')player.pos.y=QUAD_SIZE.h; return;
-      }
-      state.qx=nx; state.qy=ny;
-      if(edge==='right')player.pos.x=10; if(edge==='left')player.pos.x=QUAD_SIZE.w-10; if(edge==='down')player.pos.y=10; if(edge==='up')player.pos.y=QUAD_SIZE.h-10;
-    }
+    function tryMoveQuadrant(dx,dy,edge){ const nx=state.qx+dx, ny=state.qy+dy; if(nx<WORLD_BOUNDS.minX||nx>WORLD_BOUNDS.maxX||ny<WORLD_BOUNDS.minY||ny>WORLD_BOUNDS.maxY){ if(edge==='left')player.pos.x=0; if(edge==='right')player.pos.x=QUAD_SIZE.w; if(edge==='up')player.pos.y=0; if(edge==='down')player.pos.y=QUAD_SIZE.h; return; } state.qx=nx; state.qy=ny; if(edge==='right')player.pos.x=10; if(edge==='left')player.pos.x=QUAD_SIZE.w-10; if(edge==='down')player.pos.y=10; if(edge==='up')player.pos.y=QUAD_SIZE.h-10; }
 
-    function abilityDash(){
-      if(abilities.dash.cd>0 || state.gameOver) return;
-      const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-      const ang=Math.atan2(mouse.y-p.y, mouse.x-p.x);
-      const dist=220;
-      player.pos.x = clamp(player.pos.x + Math.cos(ang)*dist, 0, QUAD_SIZE.w);
-      player.pos.y = clamp(player.pos.y + Math.sin(ang)*dist, 0, QUAD_SIZE.h);
-      abilities.dash.cd = abilities.dash.max;
-      effects.dashFlash = 0.12; // destello breve
-    }
-
-    function abilityTwinShot(){
-      if(abilities.twin.cd>0 || state.gameOver) return;
-      const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-      const base=Math.atan2(mouse.y-p.y, mouse.x-p.x);
-      const perp={x:-Math.sin(base), y:Math.cos(base)};
-      const offset=10;
-      spawnArrow(base,1, -perp.x*offset, -perp.y*offset);
-      spawnArrow(base,1,  perp.x*offset,  perp.y*offset);
-      abilities.twin.cd = abilities.twin.max;
-    }
-
-    function abilityTripleBurst(){
-      if(abilities.burst.cd>0 || state.gameOver) return;
-      const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h);
-      const base=Math.atan2(mouse.y-p.y, mouse.x-p.x);
-      const dir={x:Math.cos(base), y:Math.sin(base)};
-      const gap=84; // separación x3
-      spawnArrow(base,1, -dir.x*0,  -dir.y*0);
-      spawnArrow(base,1, -dir.x*gap, -dir.y*gap);
-      spawnArrow(base,1, -dir.x*gap*2, -dir.y*gap*2);
-      abilities.burst.cd = abilities.burst.max;
-    }
+    function abilityDash(){ if(abilities.dash.cd>0 || state.gameOver) return; const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h); const ang=Math.atan2(mouse.y-p.y, mouse.x-p.x); const dist=220; player.pos.x = clamp(player.pos.x + Math.cos(ang)*dist, 0, QUAD_SIZE.w); player.pos.y = clamp(player.pos.y + Math.sin(ang)*dist, 0, QUAD_SIZE.h); abilities.dash.cd = abilities.dash.max; effects.dashFlash = 0.12; }
+    function abilityTwinShot(){ if(abilities.twin.cd>0 || state.gameOver) return; const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h); const base=Math.atan2(mouse.y-p.y, mouse.x-p.x); const perp={x:-Math.sin(base), y:Math.cos(base)}; const offset=10; spawnArrow(base,1, -perp.x*offset, -perp.y*offset); spawnArrow(base,1,  perp.x*offset,  perp.y*offset); abilities.twin.cd = abilities.twin.max; }
+    function abilityTripleBurst(){ if(abilities.burst.cd>0 || state.gameOver) return; const p = worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h); const base=Math.atan2(mouse.y-p.y, mouse.x-p.x); const dir={x:Math.cos(base), y:Math.sin(base)}; const gap=84; spawnArrow(base,1, -dir.x*0,  -dir.y*0); spawnArrow(base,1, -dir.x*gap, -dir.y*gap); spawnArrow(base,1, -dir.x*gap*2, -dir.y*gap*2); abilities.burst.cd = abilities.burst.max; }
 
     // ===================== Render helpers =====================
     const sx=()=>canvas.width/QUAD_SIZE.w, sy=()=>canvas.height/QUAD_SIZE.h;
@@ -267,91 +324,37 @@
     function genDecorFor(worldId,qx,qy){ const offs=worldId==='tierra'?999:worldId==='neon'?2025:0; const rnd=mulberry32(hash2i(qx+offs,qy+offs)); const rocks=[],plants=[]; const countR=8+Math.floor(rnd()*10),countP=12+Math.floor(rnd()*12); for(let i=0;i<countR;i++) rocks.push({x:rnd()*QUAD_SIZE.w,y:rnd()*QUAD_SIZE.h,r:10+rnd()*26}); for(let i=0;i<countP;i++) plants.push({x:rnd()*QUAD_SIZE.w,y:rnd()*QUAD_SIZE.h,r:6+rnd()*14}); const tint=worldId==='violeta'?(0.82+rnd()*0.16):worldId==='tierra'?(0.90+rnd()*0.10):(0.95+rnd()*0.05); return {worldId,rocks,plants,tint}; }
     function getDecor(worldId,qx,qy){ const k=decorKey(worldId,qx,qy); if(!decorCache.has(k)) decorCache.set(k,genDecorFor(worldId,qx,qy)); return decorCache.get(k); }
 
-    function drawWorldWalls(){
-      const wallW=10; ctx.save();
-      const grad=ctx.createLinearGradient(0,0,wallW,0); grad.addColorStop(0,'#ff3b3b'); grad.addColorStop(1,'#ffb3b3'); ctx.fillStyle=grad;
-      if(state.qy===WORLD_BOUNDS.minY) ctx.fillRect(0,0,QUAD_SIZE.w,wallW);
-      if(state.qy===WORLD_BOUNDS.maxY) ctx.fillRect(0,QUAD_SIZE.h-wallW,QUAD_SIZE.w,wallW);
-      if(state.qx===WORLD_BOUNDS.minX) ctx.fillRect(0,0,wallW,QUAD_SIZE.h);
-      if(state.qx===WORLD_BOUNDS.maxX) ctx.fillRect(QUAD_SIZE.w-wallW,0,wallW,QUAD_SIZE.h);
-      ctx.fillStyle='rgba(230,238,248,0.25)';
-      const arrow=(x,y,ax,ay)=>{ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-ax*14,y-ay*14);ctx.lineTo(x+ay*14,y-ax*14);ctx.closePath();ctx.fill();};
-      if(state.qy>WORLD_BOUNDS.minY) arrow(QUAD_SIZE.w/2,8,0,-1);
-      if(state.qy<WORLD_BOUNDS.maxY) arrow(QUAD_SIZE.w/2,QUAD_SIZE.h-8,0,1);
-      if(state.qx>WORLD_BOUNDS.minX) arrow(8,QUAD_SIZE.h/2,-1,0);
-      if(state.qx<WORLD_BOUNDS.maxX) arrow(QUAD_SIZE.w-8,QUAD_SIZE.h/2,1,0);
-      ctx.restore();
-    }
+    function drawWorldWalls(){ const wallW=10; ctx.save(); const grad=ctx.createLinearGradient(0,0,wallW,0); grad.addColorStop(0,'#ff3b3b'); grad.addColorStop(1,'#ffb3b3'); ctx.fillStyle=grad; if(state.qy===WORLD_BOUNDS.minY) ctx.fillRect(0,0,QUAD_SIZE.w,wallW); if(state.qy===WORLD_BOUNDS.maxY) ctx.fillRect(0,QUAD_SIZE.h-wallW,QUAD_SIZE.w,wallW); if(state.qx===WORLD_BOUNDS.minX) ctx.fillRect(0,0,wallW,QUAD_SIZE.h); if(state.qx===WORLD_BOUNDS.maxX) ctx.fillRect(QUAD_SIZE.w-wallW,0,wallW,QUAD_SIZE.h); ctx.fillStyle='rgba(230,238,248,0.25)'; const arrow=(x,y,ax,ay)=>{ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-ax*14,y-ay*14);ctx.lineTo(x+ay*14,y-ax*14);ctx.closePath();ctx.fill();}; if(state.qy>WORLD_BOUNDS.minY) arrow(QUAD_SIZE.w/2,8,0,-1); if(state.qy<WORLD_BOUNDS.maxY) arrow(QUAD_SIZE.w/2,QUAD_SIZE.h-8,0,1); if(state.qx>WORLD_BOUNDS.minX) arrow(8,QUAD_SIZE.h/2,-1,0); if(state.qx<WORLD_BOUNDS.maxX) arrow(QUAD_SIZE.w-8,QUAD_SIZE.h/2,1,0); ctx.restore(); }
 
-    function drawMinimap(){
-      const pad=12*DPR, cell=14*DPR, cols=8, rows=8, w=cols*cell, h=rows*cell; const x0=canvas.width-pad-w, y0=pad+12*DPR; const b=bosses[state.world];
-      ctx.save();
-      ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR);
-      ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=2*DPR; ctx.strokeRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR);
-      for(let gy=0;gy<rows;gy++) for(let gx=0;gx<cols;gx++){
-        const light=((gx+gy)%2)===0; ctx.fillStyle=light?'rgba(230,238,248,0.18)':'rgba(230,238,248,0.08)'; const cx=x0+gx*cell, cy=y0+gy*cell; ctx.fillRect(cx,cy,cell,cell);
-        if(b.alive&&gx===b.qx&&gy===b.qy){ctx.fillStyle= state.world==='violeta'?'rgba(255,80,80,0.9)': state.world==='tierra'?'rgba(255,180,60,0.95)':'rgba(170,120,255,0.95)'; ctx.beginPath(); ctx.arc(cx+cell/2,cy+cell/2,3.5*DPR,0,Math.PI*2); ctx.fill();}
-        if(gx===state.qx && gy===state.qy){ ctx.strokeStyle='rgba(177,198,255,0.9)'; ctx.lineWidth=2*DPR; ctx.strokeRect(cx+2*DPR,cy+2*DPR,cell-4*DPR,cell-4*DPR);} }
-      ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center';
-      for(let gx=0;gx<cols;gx++){const cx=x0+gx*cell+cell/2; ctx.fillText(String.fromCharCode(65+gx),cx,y0-6*DPR);} ctx.textAlign='right';
-      for(let gy=0;gy<rows;gy++){const cy=y0+gy*cell+cell/2+4*DPR; ctx.fillText(String(8-gy),x0-6*DPR,cy);} ctx.restore();
-    }
+    function drawMinimap(){ const pad=12*DPR, cell=14*DPR, cols=8, rows=8, w=cols*cell, h=rows*cell; const x0=canvas.width-pad-w, y0=pad+12*DPR; const b=bosses[state.world]; ctx.save(); ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR); ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=2*DPR; ctx.strokeRect(x0-6*DPR,y0-18*DPR,w+12*DPR,h+30*DPR); for(let gy=0;gy<rows;gy++) for(let gx=0;gx<cols;gx++){ const light=((gx+gy)%2)===0; ctx.fillStyle=light?'rgba(230,238,248,0.18)':'rgba(230,238,248,0.08)'; const cx=x0+gx*cell, cy=y0+gy*cell; ctx.fillRect(cx,cy,cell,cell); if(b.alive&&gx===b.qx&&gy===b.qy){ctx.fillStyle= state.world==='violeta'?'rgba(255,80,80,0.9)': state.world==='tierra'?'rgba(255,180,60,0.95)':'rgba(170,120,255,0.95)'; ctx.beginPath(); ctx.arc(cx+cell/2,cy+cell/2,3.5*DPR,0,Math.PI*2); ctx.fill();} if(gx===state.qx && gy===state.qy){ ctx.strokeStyle='rgba(177,198,255,0.9)'; ctx.lineWidth=2*DPR; ctx.strokeRect(cx+2*DPR,cy+2*DPR,cell-4*DPR,cell-4*DPR);} } ctx.fillStyle='#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; for(let gx=0;gx<cols;gx++){const cx=x0+gx*cell+cell/2; ctx.fillText(String.fromCharCode(65+gx),cx,y0-6*DPR);} ctx.textAlign='right'; for(let gy=0;gy<rows;gy++){const cy=y0+gy*cell+cell/2+4*DPR; ctx.fillText(String(8-gy),x0-6*DPR,cy);} ctx.restore(); }
 
     function drawHeartsFixed(){ const marginTop=10*DPR; const rightOffset=220*DPR; drawHearts(canvas.width - rightOffset, marginTop); }
     function drawHearts(xRight,yTop){ const n=player.hpMax; const size=24*DPR; const gap=12*DPR; for(let i=0;i<n;i++){ const filled=i<player.hp; const x=xRight-(n-i-1)*(size+gap); heartIcon(x,yTop,size,filled?'#ff5d73':'rgba(255,255,255,0.25)'); } }
     function heartIcon(x,y,s,color){ ctx.save(); ctx.translate(x,y); ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(0,s*0.35); ctx.bezierCurveTo(0,0,s*0.5,0,s*0.5,s*0.35); ctx.bezierCurveTo(s*0.5,0,s,0,s,s*0.35); ctx.bezierCurveTo(s,s*0.75,s*0.5,s,s*0.5,s); ctx.bezierCurveTo(s*0.5,s,0,s*0.75,0,s*0.35); ctx.closePath(); ctx.fill(); ctx.restore(); }
 
-    // HUD habilidades (a la izquierda de los corazones)
-    function drawAbilityHUD(){
-      const baseY = 10*DPR; const rightEdge = canvas.width - 220*DPR; const slot = 26*DPR; const gap = 8*DPR; const startX = rightEdge - (3*(slot+gap)) - 140*DPR;
-      const items=[{label:'1',cd:abilities.dash.cd,max:abilities.dash.max},{label:'2',cd:abilities.twin.cd,max:abilities.twin.max},{label:'3',cd:abilities.burst.cd,max:abilities.burst.max}];
-      ctx.save();
-      for(let i=0;i<items.length;i++){
-        const it=items[i]; const x=startX + i*(slot+gap); const y=baseY;
-        ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(x-2*DPR,y-2*DPR,slot+4*DPR,slot+4*DPR);
-        ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.strokeRect(x-2*DPR,y-2*DPR,slot+4*DPR,slot+4*DPR);
-        const cx=x+slot/2, cy=y+slot/2, r=slot*0.44; const ready=(it.cd<=0);
-        ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle= ready? 'rgba(122,162,255,0.85)' : 'rgba(40,60,105,0.85)'; ctx.fill();
-        ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=2*DPR; ctx.stroke();
-        if(!ready){ const pct=clamp(1 - it.cd/it.max, 0, 1); ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,r, -Math.PI/2, -Math.PI/2 + pct*2*Math.PI); ctx.closePath(); ctx.fillStyle='rgba(188,210,255,0.9)'; ctx.fill(); }
-        ctx.fillStyle='#0b1020'; ctx.font=`${Math.floor(12*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(items[i].label, cx, cy);
-        ctx.fillStyle= ready? 'rgba(160,210,255,0.95)':'#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(ready?'OK':String(Math.ceil(it.cd)), cx, y+slot+2*DPR);
-      }
-      ctx.restore();
-    }
+    function drawAbilityHUD(){ const baseY = 10*DPR; const rightEdge = canvas.width - 220*DPR; const slot = 26*DPR; const gap = 8*DPR; const startX = rightEdge - (3*(slot+gap)) - 140*DPR; const items=[{label:'1',cd:abilities.dash.cd,max:abilities.dash.max},{label:'2',cd:abilities.twin.cd,max:abilities.twin.max},{label:'3',cd:abilities.burst.cd,max:abilities.burst.max}]; ctx.save(); for(let i=0;i<items.length;i++){ const it=items[i]; const x=startX + i*(slot+gap); const y=baseY; ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(x-2*DPR,y-2*DPR,slot+4*DPR,slot+4*DPR); ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.strokeRect(x-2*DPR,y-2*DPR,slot+4*DPR,slot+4*DPR); const cx=x+slot/2, cy=y+slot/2, r=slot*0.44; const ready=(it.cd<=0); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle= ready? 'rgba(122,162,255,0.85)' : 'rgba(40,60,105,0.85)'; ctx.fill(); ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=2*DPR; ctx.stroke(); if(!ready){ const pct=clamp(1 - it.cd/it.max, 0, 1); ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,r, -Math.PI/2, -Math.PI/2 + pct*2*Math.PI); ctx.closePath(); ctx.fillStyle='rgba(188,210,255,0.9)'; ctx.fill(); } ctx.fillStyle='#0b1020'; ctx.font=`${Math.floor(12*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(items[i].label, cx, cy); ctx.fillStyle= ready? 'rgba(160,210,255,0.95)':'#cfe0ff'; ctx.font=`${Math.floor(10*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(ready?'OK':String(Math.ceil(it.cd)), cx, y+slot+2*DPR);} ctx.restore(); }
 
     // ===================== Render =====================
     function render(){
-      const decor=getDecor(state.world,state.qx,state.qy), tint=decor.tint;
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      // shake
-      ctx.save(); if(effects.shakeT>0){ const s=effects.shakeAmp * (effects.shakeT/0.18); const dx=(Math.random()*2-1)*s*DPR; const dy=(Math.random()*2-1)*s*DPR; ctx.translate(dx,dy);}    
-      if(state.world==='violeta'){
-        const g=ctx.createLinearGradient(0,0,canvas.width,canvas.height); g.addColorStop(0,`rgba(${Math.floor(90*tint)},${Math.floor(35*tint)},140,1)`); g.addColorStop(1,`rgba(${Math.floor(35*tint)},${Math.floor(10*tint)},70,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
-      } else if(state.world==='tierra'){
-        const g=ctx.createLinearGradient(0,0,0,canvas.height); g.addColorStop(0,`rgba(135,200,${Math.floor(130*tint)},1)`); g.addColorStop(1,`rgba(40,110,45,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);
-      } else { ctx.fillStyle='#111325'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.save(); ctx.globalAlpha=0.25; ctx.strokeStyle='#8a5cff'; for(let x=0;x<canvas.width;x+=32*DPR){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();} for(let y=0;y<canvas.height;y+=32*DPR){ctx.beginPath(); ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();} ctx.restore(); }
+      const decor=getDecor(state.world,state.qx,state.qy), tint=decor.tint; ctx.clearRect(0,0,canvas.width,canvas.height); ctx.save(); if(effects.shakeT>0){ const s=effects.shakeAmp * (effects.shakeT/0.18); const dx=(Math.random()*2-1)*s*DPR; const dy=(Math.random()*2-1)*s*DPR; ctx.translate(dx,dy);} if(state.world==='violeta'){ const g=ctx.createLinearGradient(0,0,canvas.width,canvas.height); g.addColorStop(0,`rgba(${Math.floor(90*tint)},${Math.floor(35*tint)},140,1)`); g.addColorStop(1,`rgba(${Math.floor(35*tint)},${Math.floor(10*tint)},70,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);} else if(state.world==='tierra'){ const g=ctx.createLinearGradient(0,0,0,canvas.height); g.addColorStop(0,`rgba(135,200,${Math.floor(130*tint)},1)`); g.addColorStop(1,`rgba(40,110,45,1)`); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height);} else { ctx.fillStyle='#111325'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.save(); ctx.globalAlpha=0.25; ctx.strokeStyle='#8a5cff'; for(let x=0;x<canvas.width;x+=32*DPR){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();} for(let y=0;y<canvas.height;y+=32*DPR){ctx.beginPath(); ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();} ctx.restore(); }
 
       ctx.save(); ctx.scale(sx(),sy());
-      // decor
       if(state.world==='violeta'){ ctx.globalAlpha=0.7; ctx.fillStyle='rgba(255,255,255,0.08)'; for(const r of decor.rocks){ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,Math.PI*2);ctx.fill();} ctx.globalAlpha=0.5; ctx.fillStyle='rgba(0,255,200,0.10)'; for(const p of decor.plants){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();} }
       else if(state.world==='tierra'){ ctx.globalAlpha=0.8; ctx.fillStyle='rgba(60,40,20,0.12)'; for(const r of decor.rocks){ctx.beginPath();ctx.rect(r.x-r.r*0.6,r.y-r.r*0.3,r.r*1.2,r.r*0.6);ctx.fill();} ctx.globalAlpha=0.6; ctx.fillStyle='rgba(50,200,80,0.15)'; for(const p of decor.plants){ctx.beginPath();ctx.arc(p.x,p.y,p.r*0.9,0,Math.PI*2);ctx.fill();} }
       else { ctx.globalAlpha=0.7; ctx.fillStyle='rgba(138,92,255,0.10)'; for(const r of decor.rocks){ctx.beginPath();ctx.arc(r.x,r.y,r.r*0.9,0,Math.PI*2);ctx.fill();} ctx.globalAlpha=0.5; ctx.fillStyle='rgba(0,255,255,0.12)'; for(const p of decor.plants){ctx.beginPath();ctx.arc(p.x,p.y,p.r*1.1,0,Math.PI*2);ctx.fill();} }
       ctx.globalAlpha=1;
 
+      // Criaturas
+      renderCreatures();
+      // Goblins
+      renderGoblins();
+
       // flechas con estelas
       ctx.strokeStyle='#e6eef8'; ctx.lineWidth=3; ctx.lineCap='round';
-      for(const a of state.arrows){
-        for(let k=3;k>=1;k--){ ctx.globalAlpha=0.12*k; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x-a.vx*0.03*k*0.6, a.y-a.vy*0.03*k*0.6); ctx.stroke(); }
-        ctx.globalAlpha=1;
-        const ang=Math.atan2(a.vy,a.vx); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x-Math.cos(ang-0.4)*10,a.y-Math.sin(ang-0.4)*10); ctx.lineTo(a.x-Math.cos(ang+0.4)*10,a.y-Math.sin(ang+0.4)*10); ctx.fillStyle='#e6eef8'; ctx.fill();
-      }
+      for(const a of state.arrows){ for(let k=3;k>=1;k--){ ctx.globalAlpha=0.12*k; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x-a.vx*0.03*k*0.6, a.y-a.vy*0.03*k*0.6); ctx.stroke(); } ctx.globalAlpha=1; const ang=Math.atan2(a.vy,a.vx); ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(a.x-Math.cos(ang-0.4)*10,a.y-Math.sin(ang-0.4)*10); ctx.lineTo(a.x-Math.cos(ang+0.4)*10,a.y-Math.sin(ang+0.4)*10); ctx.fillStyle='#e6eef8'; ctx.fill(); }
 
       // jugador
-      ctx.fillStyle=(player.inv>0)?'rgba(255,255,255,0.55)':'#ffffff'; if(state.paused) ctx.fillStyle='#8aa8ff';
-      ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y,player.radius,0,Math.PI*2); ctx.fill();
-      if(effects.dashFlash>0){ const a = effects.dashFlash/0.12; ctx.strokeStyle=`rgba(188,210,255,${a.toFixed(2)})`; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y,player.radius+8,0,Math.PI*2); ctx.stroke(); }
-      ctx.fillStyle='#0b1020'; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y-3,player.radius*0.55,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=(player.inv>0)?'rgba(255,255,255,0.55)':'#ffffff'; if(state.paused) ctx.fillStyle='#8aa8ff'; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y,player.radius,0,Math.PI*2); ctx.fill(); if(effects.dashFlash>0){ const a = effects.dashFlash/0.12; ctx.strokeStyle=`rgba(188,210,255,${a.toFixed(2)})`; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y,player.radius+8,0,Math.PI*2); ctx.stroke(); } ctx.fillStyle='#0b1020'; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y-3,player.radius*0.55,0,Math.PI*2); ctx.fill();
 
       // arco visual
       const ps=worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h); const aim=norm(mouse.x-ps.x, mouse.y-ps.y); const bowR=player.radius+6; ctx.strokeStyle='#b1c6ff'; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(player.pos.x,player.pos.y,bowR, Math.atan2(aim.y,aim.x)-0.9, Math.atan2(aim.y,aim.x)+0.9); ctx.stroke();
@@ -360,8 +363,7 @@
       renderBoss();
 
       // marco del cuadrante
-      const worldBorder= state.world==='violeta'?'rgba(220,160,255,0.65)': state.world==='tierra'?'rgba(120,200,120,0.65)':'rgba(170,120,255,0.70)';
-      ctx.setLineDash([8,6]); ctx.strokeStyle=worldBorder; ctx.lineWidth=2; ctx.strokeRect(4,4,QUAD_SIZE.w-8,QUAD_SIZE.h-8); ctx.setLineDash([]);
+      const worldBorder= state.world==='violeta'?'rgba(220,160,255,0.65)': state.world==='tierra'?'rgba(120,200,120,0.65)':'rgba(170,120,255,0.70)'; ctx.setLineDash([8,6]); ctx.strokeStyle=worldBorder; ctx.lineWidth=2; ctx.strokeRect(4,4,QUAD_SIZE.w-8,QUAD_SIZE.h-8); ctx.setLineDash([]);
 
       // muros exteriores
       drawWorldWalls();
@@ -370,10 +372,7 @@
       ctx.restore(); // shake
 
       // UI
-      drawMinimap();
-      drawHeartsFixed();
-      drawAbilityHUD();
-      if(state.showBag) renderBag();
+      drawMinimap(); drawHeartsFixed(); drawAbilityHUD(); if(state.showBag) renderBag();
 
       if(state.paused && !state.gameOver){ ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#e6eef8'; ctx.font=`${Math.floor(24*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.fillText('Pausado', canvas.width/2, canvas.height/2); }
       if(state.gameOver){ ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#ff9191'; ctx.font=`${Math.floor(46*DPR)}px system-ui,Segoe UI,Roboto`; ctx.textAlign='center'; ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2 - 24*DPR); restartBtn.style.display='block'; }
@@ -383,13 +382,7 @@
 
     // ===================== Loop =====================
     let fpsSmoothed=60;
-    function step(){
-      const now=performance.now(); const dt=Math.min(0.033,(now-state.lastTime)/1000); state.lastTime=now;
-      if(!state.paused && !state.gameOver) update(dt);
-      render();
-      const fps=1/dt; fpsSmoothed=fpsSmoothed*0.9+fps*0.1; fpsEl.textContent='FPS: '+fpsSmoothed.toFixed(0);
-      requestAnimationFrame(step);
-    }
+    function step(){ const now=performance.now(); const dt=Math.min(0.033,(now-state.lastTime)/1000); state.lastTime=now; if(!state.paused && !state.gameOver) update(dt); render(); const fps=1/dt; fpsSmoothed=fpsSmoothed*0.9+fps*0.1; fpsEl.textContent='FPS: '+fpsSmoothed.toFixed(0); requestAnimationFrame(step); }
 
     function update(dt){
       // CDs
@@ -397,9 +390,11 @@
       if(abilities.twin.cd>0) abilities.twin.cd-=dt; if(abilities.twin.cd<0) abilities.twin.cd=0;
       if(abilities.burst.cd>0) abilities.burst.cd-=dt; if(abilities.burst.cd<0) abilities.burst.cd=0;
 
+      // Invencibilidad (FIX: ahora decae)
+      if(player.inv>0){ player.inv-=dt; if(player.inv<0) player.inv=0; }
+
       // Movimiento
-      let ax=0,ay=0; if(keys.has('w')||keys.has('arrowup')) ay-=1; if(keys.has('s')||keys.has('arrowdown')) ay+=1; if(keys.has('a')||keys.has('arrowleft')) ax-=1; if(keys.has('d')||keys.has('arrowright')) ax+=1;
-      const d=norm(ax,ay); player.pos.x+=d.x*player.speed*dt; player.pos.y+=d.y*player.speed*dt;
+      let ax=0,ay=0; if(keys.has('w')||keys.has('arrowup')) ay-=1; if(keys.has('s')||keys.has('arrowdown')) ay+=1; if(keys.has('a')||keys.has('arrowleft')) ax-=1; if(keys.has('d')||keys.has('arrowright')) ax+=1; const d=norm(ax,ay); player.pos.x+=d.x*player.speed*dt; player.pos.y+=d.y*player.speed*dt;
 
       // Cambios de cuadrante
       if(player.pos.x<0){ if(state.qx===WORLD_BOUNDS.minX){player.pos.x=0;} else {tryMoveQuadrant(-1,0,'left');} }
@@ -413,8 +408,10 @@
       // Flechas
       for(let i=state.arrows.length-1;i>=0;i--){ const a=state.arrows[i]; a.x+=a.vx*dt; a.y+=a.vy*dt; a.life-=dt; if(a.x<-40||a.x>QUAD_SIZE.w+40||a.y<-40||a.y>QUAD_SIZE.h+40||a.life<=0) state.arrows.splice(i,1); }
 
-      // Boss
+      // Enemigos
+      updateGoblins(dt);
       updateBoss(dt);
+      updateCreatures(dt);
 
       // Decaimiento de efectos
       if(effects.dashFlash>0){ effects.dashFlash-=dt; if(effects.dashFlash<0) effects.dashFlash=0; }
@@ -427,9 +424,12 @@
     function dot(ax,ay,bx,by){ return ax*bx+ay*by; }
     function runTests(){
       const results=[]; const push=(name,pass,msg='')=>results.push({name,pass,msg});
-      const backup={ arrows: state.arrows.slice(), twinCD: abilities.twin.cd, burstCD: abilities.burst.cd, playerPos: {x:player.pos.x,y:player.pos.y}, fireCD: player.fireCooldown, paused: state.paused };
+      const backup={ arrows: state.arrows.slice(), twinCD: abilities.twin.cd, burstCD: abilities.burst.cd, playerPos: {x:player.pos.x,y:player.pos.y}, fireCD: player.fireCooldown, paused: state.paused, hp: player.hp, inv: player.inv };
+      // Backup de boss actual (FIX: que los tests no alteren la partida)
+      const bossRef=bosses[state.world];
+      const bossBackup=JSON.parse(JSON.stringify(bossRef));
       try{
-        state.arrows.length=0; abilities.twin.cd=0; abilities.burst.cd=0; player.fireCooldown=0; state.paused=true;
+        state.arrows.length=0; abilities.twin.cd=0; abilities.burst.cd=0; player.fireCooldown=0; state.paused=true; player.hp=player.hpMax; player.inv=0;
         const ps=worldToScreen(player.pos.x + state.qx*QUAD_SIZE.w, player.pos.y + state.qy*QUAD_SIZE.h); mouse.x=ps.x+200*DPR; mouse.y=ps.y;
         // T1 Twin
         abilityTwinShot(); const t1Count=state.arrows.length===2; let t1Angles=false, t1Parallel=false; if(t1Count){ const a0=state.arrows[0], a1=state.arrows[1]; t1Angles=approx(angleOf(a0.vx,a0.vy), angleOf(a1.vx,a1.vy),1e-3); const dir=norm(a0.vx,a0.vy); const sep = dot(a1.x-a0.x, a1.y-a0.y, dir.x, dir.y); t1Parallel=Math.abs(sep)<1e-1; } push('T1 Twin: 2 paralelas', t1Count&&t1Angles&&t1Parallel);
@@ -438,19 +438,31 @@
         // T5 separación ~ 84
         if(t2Count){ const a=[...state.arrows]; const dir=norm(a[0].vx,a[0].vy); const proj=(p)=>p.x*dir.x+p.y*dir.y; const d01=proj(a[0])-proj(a[1]); const d12=proj(a[1])-proj(a[2]); const okSep=approx(d01,84,2)&&approx(d12,84,2); push('T5 Triple: separación ≈ 84px', okSep, `d01=${d01.toFixed(1)}, d12=${d12.toFixed(1)}`); }
         // T6 daño acumulado 3 flechas
-        {
-          const b=bosses[state.world]; b.qx=state.qx; b.qy=state.qy; b.x=player.pos.x; b.y=player.pos.y; b.alive=true; b.hp=100; b.hpMax=100;
-          state.arrows.length=0; state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1}); state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1}); state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1}); updateBoss(0.016);
-          push('T6 Daño acumulado (3=30)', b.hp===70, `hp=${b.hp}`);
-        }
+        { const b=bosses[state.world]; b.qx=state.qx; b.qy=state.qy; b.x=player.pos.x; b.y=player.pos.y; b.alive=true; b.hp=100; b.hpMax=100; state.arrows.length=0; state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1}); state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1}); state.arrows.push({x:player.pos.x,y:player.pos.y,vx:0,vy:0,life:1}); updateBoss(0.016); push('T6 Daño acumulado (3=30)', b.hp===70, `hp=${b.hp}`); }
         // T7 cooldown ≈ 0.76s
         { state.arrows.length=0; player.fireCooldown=0; shoot(); push('T7 Cooldown base ≈ 0.76s', Math.abs(player.fireCooldown-0.76)<0.1, `cd=${player.fireCooldown.toFixed(2)}`); }
         // T8 hp orden por mundo
         { const hv=bosses.violeta.hpMax, ht=bosses.tierra.hpMax, hn=bosses.neon.hpMax; push('T8 HP Violeta<Tierra<Neón', (hv<ht)&&(ht<hn), `hv=${hv}, ht=${ht}, hn=${hn}`); }
         // T9 dash flash setea y decae
         { const prev=effects.dashFlash; abilityDash(); const set=effects.dashFlash>0; const before=effects.dashFlash; update(0.06); const decayed=effects.dashFlash<before; push('T9 Dash flash', set&&decayed, `before=${before.toFixed(2)}`); }
+        // T10 invencibilidad decae
+        { player.inv=0.5; update(0.3); const mid=player.inv<0.5 && player.inv>0; update(0.3); const ended=player.inv===0; push('T10 Invencibilidad decae', mid&&ended, `inv=${player.inv.toFixed(2)}`); }
+        // T11 Criaturas tablero: 15 por mundo
+        { const listAll=getWorldCreatures(state.world); push('T11 Criaturas tablero: 15', listAll.length===15, `len=${listAll.length}`); }
+        // T11b Goblins tablero: 10 por mundo
+        { const gAll=getWorldGoblins(state.world); push('T11b Goblins tablero: 10', gAll.length===10, `len=${gAll.length}`); }
+        // T12 Criaturas visibles en el cuadrante: 0..15
+        { const all=getWorldCreatures(state.world); const ox=state.qx*QUAD_SIZE.w, oy=state.qy*QUAD_SIZE.h; const vis=all.filter(c=>c.wx>=ox&&c.wx<ox+QUAD_SIZE.w&&c.wy>=oy&&c.wy<oy+QUAD_SIZE.h); push('T12 Criaturas visibles 0..15', vis.length>=0 && vis.length<=15, `vis=${vis.length}`); }
+        // T13 Daño por contacto (si hay visible)
+        { const all=getWorldCreatures(state.world); const ox=state.qx*QUAD_SIZE.w, oy=state.qy*QUAD_SIZE.h; const vis=all.filter(c=>c.wx>=ox&&c.wx<ox+QUAD_SIZE.w&&c.wy>=oy&&c.wy<oy+QUAD_SIZE.h); if(vis.length){ const c=vis[0]; const oldHP=player.hp; player.pos.x=c.wx-ox; player.pos.y=c.wy-oy; player.inv=0; updateCreatures(0.016); push('T13 Criatura daña contacto', player.hp===oldHP-1 || player.inv>0, `hp=${player.hp}`); } else { push('T13 Criatura daña contacto (sin visibles)', true, ''); } }
+        // T14 Boss spawn en rango
+        { const b=bosses[state.world]; const ok = (b.x>=0&&b.x<=QUAD_SIZE.w&&b.y>=0&&b.y<=QUAD_SIZE.h); push('T14 Boss spawn en rango', ok, `x=${b.x.toFixed(1)}, y=${b.y.toFixed(1)}`); }
       }catch(e){ push('Excepción general tests', false, e.message||String(e)); }
-      finally{ state.arrows = backup.arrows.slice(); abilities.twin.cd = backup.twinCD; abilities.burst.cd = backup.burstCD; player.pos.x = backup.playerPos.x; player.pos.y=backup.playerPos.y; player.fireCooldown = backup.fireCD; state.paused = backup.paused; }
+      finally{
+        state.arrows = backup.arrows.slice(); abilities.twin.cd = backup.twinCD; abilities.burst.cd = backup.burstCD; player.pos.x = backup.playerPos.x; player.pos.y=backup.playerPos.y; player.fireCooldown = backup.fireCD; state.paused = backup.paused; player.hp=backup.hp; player.inv=backup.inv;
+        // Restaurar boss
+        bosses[state.world]=bossBackup; updateBossBadge();
+      }
       const passed = results.filter(r=>r.pass).length; testsEl.textContent = `Tests: ${passed}/${results.length}`; console.table(results);
     }
 
